@@ -1678,6 +1678,44 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         initCodeRunner();
         initTypewriterAndFocus();
         initSlashCommands();
+        initHorizontalScrollbars();
+    }
+
+    function initHorizontalScrollbars() {
+        const scrollContainers = [
+            document.getElementById('app-header'),
+            document.getElementById('live-hud'),
+            document.getElementById('tabs-bar')
+        ].filter(Boolean);
+
+        scrollContainers.forEach(container => {
+            let isDown = false;
+            let startX = 0;
+            let scrollLeft = 0;
+
+            container.addEventListener('mousedown', (e) => {
+                if (e.target.closest('button, input, select, a, .flare-btn, .dropdown-group')) return;
+                isDown = true;
+                startX = e.pageX - container.offsetLeft;
+                scrollLeft = container.scrollLeft;
+                container.style.cursor = 'grab';
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isDown) {
+                    isDown = false;
+                    container.style.cursor = '';
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isDown) return;
+                e.preventDefault();
+                const x = e.pageX - container.offsetLeft;
+                const walk = (x - startX) * 1.5;
+                container.scrollLeft = scrollLeft - walk;
+            });
+        });
     }
 
     function generateToken() { 
@@ -3751,6 +3789,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         const safeCode = `
             <!DOCTYPE html>
             <html>
+            <head>
+                <meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline';">
+            </head>
             <body>
             <script>
                 const _send = (lvl, args) => {

@@ -1067,14 +1067,24 @@ body.split-mode #preview {
     -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid var(--border-color);
     display: flex;
-    justify-content: space-between;
     align-items: center;
     padding: 0 14px;
+    gap: 12px;
     z-index: 90;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     box-sizing: border-box;
     box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    scrollbar-width: none;
+}
+
+#live-hud.live-bottom-bar::-webkit-scrollbar {
+    display: none;
 }
 
 .hud-left-section {
@@ -1082,6 +1092,7 @@ body.split-mode #preview {
     align-items: center;
     gap: 10px;
     flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .hud-right-section {
@@ -1090,11 +1101,15 @@ body.split-mode #preview {
     gap: 12px;
     color: var(--primary-color);
     flex-shrink: 0;
+    white-space: nowrap;
+    margin-left: auto;
 }
 
 .hud-stat {
     color: var(--text-muted);
     font-size: 0.73rem;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .hud-sec-pill {
@@ -1106,6 +1121,8 @@ body.split-mode #preview {
     border-radius: 10px;
     letter-spacing: 0.5px;
     user-select: none;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .hud-profile-pill {
@@ -1122,6 +1139,8 @@ body.split-mode #preview {
     font-family: var(--font-sans);
     font-weight: 500;
     transition: all 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .hud-profile-pill:hover {
@@ -1135,6 +1154,7 @@ body.split-mode #preview {
     width: 1px;
     height: 14px;
     background: var(--border-color);
+    flex-shrink: 0;
 }
 
 .hud-timer-badge {
@@ -1144,6 +1164,8 @@ body.split-mode #preview {
     padding: 2px 8px;
     border-radius: 12px;
     font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 .glowing-dot {
     width: 6px;
@@ -1831,6 +1853,12 @@ body.zen-mode #zen-exit-btn { display: block; }
         overflow-x: auto;
         overflow-y: hidden;
         flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x;
+        scrollbar-width: none;
+    }
+    #app-header::-webkit-scrollbar {
+        display: none;
     }
     .header-left-section {
         max-width: none;
@@ -1860,9 +1888,38 @@ body.zen-mode #zen-exit-btn { display: block; }
         left: 10px; 
         height: 55vh; 
     }
-    .live-bottom-bar { 
-        padding: 0 8px; 
-        font-size: 0.72rem; 
+    #live-hud.live-bottom-bar { 
+        padding: 0 10px; 
+        gap: 10px;
+        font-size: 0.72rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x;
+        scrollbar-width: none;
+    }
+    #live-hud.live-bottom-bar::-webkit-scrollbar { 
+        display: none; 
+    }
+    .hud-left-section {
+        flex-shrink: 0;
+        gap: 8px;
+    }
+    .hud-right-section {
+        flex-shrink: 0;
+        gap: 8px;
+        margin-left: 0;
+        padding-right: 14px;
+    }
+    .hud-right-section::before {
+        content: '';
+        width: 1px;
+        height: 14px;
+        background: var(--border-color);
+        display: inline-block;
+        margin-right: 4px;
+        flex-shrink: 0;
     }
     .glitch-text { 
         font-size: 2.5rem; 
@@ -1928,6 +1985,8 @@ body.zen-mode #zen-exit-btn { display: block; }
     border-radius: 12px;
     padding: 1px 4px;
     user-select: none;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 .flare-btn {
     cursor: pointer;
@@ -1986,6 +2045,8 @@ body.zen-mode #zen-exit-btn { display: block; }
     gap: 4px;
     transition: all 0.15s;
     user-select: none;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 .hud-voice-btn:hover {
     border-color: var(--primary-color);
@@ -2238,6 +2299,8 @@ body.zen-mode #zen-exit-btn { display: block; }
     align-items: center;
     gap: 4px;
     transition: all 0.2s ease;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 .hud-tool-btn:hover {
     background: rgba(var(--primary-rgb), 0.15);
