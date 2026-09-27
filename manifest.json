@@ -1,0 +1,17 @@
+{
+  "name": "QuickPad",
+  "short_name": "QuickPad",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "description": "A serverless, real-time scratchpad.",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

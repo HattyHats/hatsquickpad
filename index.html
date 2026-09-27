@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>QuickPad — Zero-Knowledge Real-Time Scratchpad</title>
+    <meta name="description" content="A hyper-fast, serverless scratchpad with zero-knowledge AES-256 end-to-end encryption. No logins, no paywalls, instant real-time sync across devices.">
+    <meta property="og:title" content="QuickPad — Zero-Knowledge Scratchpad">
+    <meta property="og:description" content="Ultra-fast, serverless, real-time encrypted note taking. No login required.">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+    
+    <!-- PWA Setup -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0f1d">
+    <link rel="apple-touch-icon" href="icon.png">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=35">
+    
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- KaTeX for Math Equations -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- Mermaid.js for Architecture & Flowchart Diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
+    <!-- Highlight.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <!-- CryptoJS for client-side encryption -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    
+    <!-- DOMPurify to prevent Markdown XSS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
+
+    <!-- Firebase Compat SDKs (Ensures 100% functionality on local file:// and HTTPS) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+    <!-- Splash Screen -->
+    <div id="splash-screen">
+        <div id="splash-bg"></div>
+        <div class="splash-content">
+            <div class="splash-badge">ZERO-KNOWLEDGE SCRATCHPAD</div>
+            <h1 class="glitch-text" data-text="Quick-Pad">Quick-Pad</h1>
+            <p class="glitch-subtext" data-text="End-to-End Encrypted • Real-Time Sync">End-to-End Encrypted • Real-Time Sync</p>
+
+            <div id="splash-spinner-container">
+                <div class="splash-spinner"></div>
+                <div class="splash-loading-text">INITIALIZING SECURE SESSION...</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function() {
+            const splash = document.getElementById('splash-screen');
+            const bg = document.getElementById('splash-bg');
+            if (bg) {
+                const snippets = ["console.log('init');", "function setup() {}", "await crypto.encrypt()", "QuickPad::AES256", "{ zeroKnowledge: true }", "01001010", "localStorage.sync()", "class Workspace {}", "while(active)"];
+                for (let i = 0; i < 24; i++) {
+                    const note = document.createElement('div');
+                    note.className = 'flying-note';
+                    note.innerText = snippets[Math.floor(Math.random() * snippets.length)];
+                    note.style.left = (Math.random() * 100) + '%';
+                    note.style.top = (Math.random() * 100) + '%';
+                    note.style.animationDuration = (3 + Math.random() * 4) + 's';
+                    note.style.animationDelay = (Math.random() * 3) + 's';
+                    bg.appendChild(note);
+                }
+            }
+            function dismissSplash() {
+                if (!splash || splash.style.display === 'none') return;
+                splash.style.opacity = '0';
+                setTimeout(() => {
+                    splash.style.display = 'none';
+                    const ed = document.getElementById('editor');
+                    if (ed) ed.focus();
+                }, 600);
+            }
+            // Auto dismiss after 1.8 seconds
+            setTimeout(dismissSplash, 1800);
+            if (splash) splash.addEventListener('click', dismissSplash);
+            window.addEventListener('keydown', dismissSplash, { once: true });
+        })();
+    </script>
+
+    <!-- Matrix Screensaver Canvas -->
+    <canvas id="matrix-canvas"></canvas>
+
+    <!-- Status & Sync Loader -->
+    <div id="loader" class="loader">
+        <span class="loader-dot"></span>
+        <span id="loader-text">Syncing...</span>
+    </div>
+    
+    <div id="typing-indicator" class="typing-indicator hidden">Someone is typing...</div>
+
+    <!-- Top Navigation Header -->
+    <header id="app-header">
+        <!-- Left Brand & Tabs -->
+        <div class="header-left-section">
+            <div class="brand-badge" title="QuickPad Zero-Knowledge Workspace">
+                <span class="brand-icon">⚡</span>
+                <span class="brand-title">QUICKPAD</span>
+                <span class="sec-dot" title="E2EE AES-256 Active"></span>
+            </div>
+
+            <!-- Tabs Bar -->
+            <div id="tabs-bar">
+                <div id="tabs-container"></div>
+                <button id="add-tab-btn" class="header-icon-btn" title="Add New Tab (Ctrl+T)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Right Action Bar -->
+        <div class="action-bar">
+            <!-- Find & Replace Button -->
+            <button id="find-toggle-btn" class="btn" title="Find & Replace in document (⌘F)">
+                <span>🔍 Find</span>
+            </button>
+
+            <!-- View Dropdown -->
+            <div class="btn dropdown-group" title="View Options">
+                <span>👁️ View</span>
+                <div class="dropdown-menu">
+                    <button id="md-toggle-btn" class="menu-action-btn">
+                        <span>👁️ Markdown Preview</span>
+                        <kbd>Alt+M</kbd>
+                    </button>
+                    <button id="split-toggle-btn" class="menu-action-btn">
+                        <span>🌗 Split View</span>
+                        <kbd>Alt+S</kbd>
+                    </button>
+                    <button id="zen-btn" class="menu-action-btn">
+                        <span>🧘 Zen Mode</span>
+                        <kbd>Alt+Z</kbd>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button id="typewriter-toggle-btn" class="menu-action-btn">
+                        <span>📜 Typewriter Scroll</span>
+                        <kbd>Alt+T</kbd>
+                    </button>
+                    <button id="focus-toggle-btn" class="menu-action-btn">
+                        <span>🎯 Focus Dimming</span>
+                        <kbd>Alt+H</kbd>
+                    </button>
+                    <button id="spotlight-toggle-btn" class="menu-action-btn">
+                        <span>🔦 Presenter Spotlight</span>
+                        <kbd>Alt+O</kbd>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button id="code-runner-toggle-btn" class="menu-action-btn" style="color:var(--primary-color);">
+                        <span>▶️ Live Code Runner</span>
+                        <kbd>⌘Enter</kbd>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Editor & Typography Dropdown -->
+            <div class="btn dropdown-group" title="Editor & Typography">
+                <span>⚙️ Format</span>
+                <div class="dropdown-menu">
+                    <div class="menu-label">Typography</div>
+                    <div class="menu-row font-selector">
+                        <button id="font-mono-btn" class="font-btn active" data-font="mono">Mono</button>
+                        <button id="font-sans-btn" class="font-btn" data-font="sans">Sans</button>
+                        <button id="font-serif-btn" class="font-btn" data-font="serif">Serif</button>
+                    </div>
+                    <div class="menu-row font-size-ctrls">
+                        <button id="font-dec-btn" class="menu-action-btn font-size-btn">A-</button>
+                        <span id="font-size-label" class="font-size-val">16px</span>
+                        <button id="font-inc-btn" class="menu-action-btn font-size-btn">A+</button>
+                    </div>
+                    <div class="menu-divider"></div>
+                    <button id="cmd-palette-btn" class="menu-action-btn">
+                        <span>⚡ Command Palette</span>
+                        <kbd>⌘K</kbd>
+                    </button>
+                </div>
+            </div>
+
+            <!-- File Actions Dropdown -->
+            <div class="btn dropdown-group" title="File Actions">
+                <span>📁 File</span>
+                <div class="dropdown-menu">
+                    <button id="export-md-btn" class="menu-action-btn">
+                        <span>📥 Download Markdown (.md)</span>
+                    </button>
+                    <button id="export-txt-btn" class="menu-action-btn">
+                        <span>📄 Download Text (.txt)</span>
+                    </button>
+                    <button id="export-json-btn" class="menu-action-btn">
+                        <span>📦 Backup All Tabs (.json)</span>
+                    </button>
+                    <button id="export-html-btn" class="menu-action-btn" style="color:var(--primary-color);">
+                        <span>🔐 Export Encrypted HTML (.html)</span>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button id="steg-open-btn" class="menu-action-btn" style="color:#00fff9;">
+                        <span>🖼️ Ghost Steganography...</span>
+                    </button>
+                    <button id="wormhole-open-btn" class="menu-action-btn" style="color:#00ff66;">
+                        <span>⚡ P2P Wormhole File Beam...</span>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button id="import-file-btn" class="menu-action-btn">
+                        <span>📤 Import File / Restore...</span>
+                    </button>
+                    <button id="insert-image-btn" class="menu-action-btn">
+                        <span>🖼️ Insert Image from Device...</span>
+                    </button>
+                    <input type="file" id="note-image-file-input" accept="image/*" style="display:none;">
+                </div>
+            </div>
+            
+            <!-- Quick Copy -->
+            <button id="copy-btn" class="btn" title="Copy note text to clipboard (⌘C)">
+                <span>📋 Copy</span>
+            </button>
+
+            <!-- Direct Share Button -->
+            <button id="share-btn" class="btn primary-action share-btn" title="Share Workspace Links & QR">
+                <span>🔗 Share</span>
+            </button>
+
+            <!-- Security Dropdown -->
+            <div class="btn dropdown-group burn" title="Security & Burn">
+                <span>🔥 Security</span>
+                <div class="dropdown-menu">
+                    <button id="instant-burn-btn" class="menu-action-btn burn" style="color:#ff0055;font-weight:600;">💥 Burn Note Right Away</button>
+                    <div class="menu-divider"></div>
+                    <button id="timer-btn" class="menu-action-btn">⏳ Set Self-Destruct Timer</button>
+                    <button id="burn-btn" class="menu-action-btn burn">🔥 Create Burn Note Link</button>
+                    <div class="menu-divider"></div>
+                    <button id="duress-btn" class="menu-action-btn">🛡️ Set Duress PIN (Decoy Vault)</button>
+                    <button id="panic-btn" class="menu-action-btn">🕶️ Panic Camouflage (Alt+P)</button>
+                </div>
+            </div>
+
+            <!-- Settings Dropdown -->
+            <div class="btn dropdown-group" title="Settings & Themes">
+                <span>🎨 Settings</span>
+                <div id="settings-menu" class="dropdown-menu">
+                    <div class="menu-label">Theme Accents</div>
+                    <div class="menu-row theme-picker-row">
+                        <div class="theme-btn" style="background:#00fff9" data-theme="" title="Cyber Cyan"></div>
+                        <div class="theme-btn" style="background:#00ff00" data-theme="theme-matrix" title="Matrix Green"></div>
+                        <div class="theme-btn" style="background:#ff003c" data-theme="theme-red" title="Crimson Red"></div>
+                        <div class="theme-btn" style="background:#b026ff" data-theme="theme-purple" title="Neon Purple"></div>
+                        <div class="theme-btn" style="background:#ffb000" data-theme="theme-amber" title="Amber Gold"></div>
+                        <div class="theme-btn" style="background:#3b82f6" data-theme="theme-blue" title="Electric Blue"></div>
+                    </div>
+                    <div class="menu-label">Custom Background</div>
+                    <div class="menu-row" style="margin-bottom: 5px; padding: 0 4px;">
+                        <input type="color" id="bg-color-picker" title="Custom Background Color" value="#0b0f19" class="bg-picker-input">
+                    </div>
+                    <div class="menu-label">Screensaver Timeout</div>
+                    <div class="menu-row ss-row">
+                        <div class="ss-btn" data-time="0">Off</div>
+                        <div class="ss-btn" data-time="2">2m</div>
+                        <div class="ss-btn" data-time="5">5m</div>
+                        <div class="ss-btn" data-time="15">15m</div>
+                    </div>
+                    <div class="menu-divider"></div>
+                    <div class="menu-label">Mechanical Switch Audio FX</div>
+                    <div class="menu-row sound-picker-row">
+                        <button class="sound-fx-btn active" data-sound="off">Off</button>
+                        <button class="sound-fx-btn" data-sound="thock">Thock</button>
+                        <button class="sound-fx-btn" data-sound="click">Click</button>
+                        <button class="sound-fx-btn" data-sound="modelm">Model M</button>
+                        <button class="sound-fx-btn" data-sound="cyber">Cyber</button>
+                    </div>
+                    <div class="menu-label" style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                        <span>Cipher Glitch Decrypt</span>
+                        <input type="checkbox" id="glitch-toggle" checked style="cursor:pointer; accent-color:var(--primary-color);">
+                    </div>
+                    <div class="menu-divider"></div>
+                    <button id="name-btn" class="menu-action-btn">👤 Edit Profile</button>
+                    <button id="qr-btn" class="menu-action-btn">📱 Mobile QR Code</button>
+                    <button id="info-btn" class="menu-action-btn">ℹ️ About QuickPad</button>
+                    <div class="menu-divider"></div>
+                    <div class="menu-label" style="text-align: center; color: var(--primary-color);">Support the Creator</div>
+                    <a href="https://cash.app/$hattyhatss" target="_blank" rel="noopener noreferrer" class="menu-action-btn">💸 Cash App</a>
+                    <a href="https://buymeacoffee.com/hatty" target="_blank" rel="noopener noreferrer" class="menu-action-btn">☕ Buy Me a Coffee</a>
+                </div>
+            </div>
+
+            <button id="new-btn" class="btn btn-new-pad" title="Create New Workspace">
+                <span>✨ New</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Floating Find & Replace Toolbar -->
+    <div id="find-replace-bar" class="find-replace-bar hidden">
+        <div class="find-group">
+            <input type="text" id="find-input" placeholder="Find in document..." autocomplete="off">
+            <span id="find-match-count" class="find-count">0/0</span>
+            <button id="find-prev-btn" class="find-icon-btn" title="Previous Match (Shift+Enter)">▲</button>
+            <button id="find-next-btn" class="find-icon-btn" title="Next Match (Enter)">▼</button>
+        </div>
+        <div class="replace-group">
+            <input type="text" id="replace-input" placeholder="Replace with..." autocomplete="off">
+            <button id="replace-btn" class="find-action-btn">Replace</button>
+            <button id="replace-all-btn" class="find-action-btn">All</button>
+        </div>
+        <button id="find-close-btn" class="find-icon-btn close-find" title="Close (Esc)">&times;</button>
+    </div>
+
+    <!-- Hidden File Input for Import -->
+    <input type="file" id="file-import-input" class="hidden" accept=".txt,.md,.json,.js,.py,.html,.css,.csv">
+
+    <!-- Workspace Main Editor, Previews & Whiteboard Canvas -->
+    <main id="workspace-main">
+        <div id="focus-line-indicator" class="focus-line-indicator"></div>
+        <textarea id="editor" placeholder="Start typing... Everything auto-saves with zero-knowledge AES-256 encryption. (Type / for commands, paste images, or create .draw for whiteboard)" autofocus></textarea>
+        <div id="preview" class="markdown-body hidden"></div>
+        <div id="editor-mirror"></div>
+        <div id="cursors-container"></div>
+        
+        <!-- Real-Time Collaborator Laser Trail Canvas -->
+        <canvas id="laser-canvas" class="laser-canvas"></canvas>
+
+        <!-- Inline Slash Command Snippet Expander Popup -->
+        <div id="slash-popup" class="slash-popup hidden">
+            <div class="slash-popup-header">⚡ INSERT TEMPLATE OR TOOL</div>
+            <div id="slash-items" class="slash-items-list"></div>
+        </div>
+
+        <!-- Whiteboard Drawing Canvas Container (Active on .draw tabs) -->
+        <div id="canvas-container" class="canvas-container hidden">
+            <div class="whiteboard-toolbar">
+                <button class="wb-tool-btn active" id="wb-pen-btn" title="Cyber Pen">✏️ Pen</button>
+                <button class="wb-tool-btn" id="wb-eraser-btn" title="Eraser">🧹 Eraser</button>
+                <div class="wb-divider"></div>
+                <div class="wb-colors">
+                    <span class="wb-color active" style="background:#00fff9" data-color="#00fff9"></span>
+                    <span class="wb-color" style="background:#00ff66" data-color="#00ff66"></span>
+                    <span class="wb-color" style="background:#ff0055" data-color="#ff0055"></span>
+                    <span class="wb-color" style="background:#ffb000" data-color="#ffb000"></span>
+                    <span class="wb-color" style="background:#ffffff" data-color="#ffffff"></span>
+                </div>
+                <div class="wb-divider"></div>
+                <input type="range" id="wb-size" min="2" max="24" value="4" title="Brush Size" class="wb-slider">
+                <div class="wb-divider"></div>
+                <button class="wb-action-btn" id="wb-undo-btn" title="Undo Stroke">↩️</button>
+                <button class="wb-action-btn" id="wb-clear-btn" title="Clear Canvas">🗑️</button>
+            </div>
+            <canvas id="whiteboard-canvas"></canvas>
+        </div>
+    </main>
+
+    <!-- Sandboxed Live Code Runner Console Drawer -->
+    <div id="code-runner-drawer" class="code-runner-drawer hidden">
+        <div class="code-runner-header">
+            <div class="code-runner-title">
+                <span class="runner-dot"></span>
+                <span>▶️ Live Sandbox Runner</span>
+                <span id="runner-mode-badge" class="runner-badge">JS</span>
+            </div>
+            <div class="code-runner-actions">
+                <button id="run-code-btn" class="btn primary-action run-btn" title="Execute Code (Ctrl+Enter)">▶ Run</button>
+                <button id="clear-console-btn" class="btn" title="Clear Console">🧹 Clear</button>
+                <button id="close-runner-btn" class="close-btn" title="Close Console">&times;</button>
+            </div>
+        </div>
+        <div id="console-output" class="console-output"></div>
+        <div id="sandbox-iframe-container" class="sandbox-iframe-container hidden">
+            <iframe id="sandbox-iframe" sandbox="allow-scripts allow-modals" class="sandbox-iframe"></iframe>
+        </div>
+    </div>
+    
+    <!-- Live Bottom Status & Presence Bar -->
+    <div id="live-hud" class="live-bottom-bar hidden">
+        <div class="hud-left-section">
+            <!-- User Profile Pill -->
+            <button id="profile-pill-btn" class="hud-profile-pill" title="Click to customize your profile name and avatar">
+                <span id="profile-avatar-display" class="profile-avatar-circle">👤</span>
+                <span id="profile-name-display" class="profile-name-text">Anon (You)</span>
+                <span class="profile-edit-badge">✏️</span>
+            </button>
+
+            <div class="hud-divider"></div>
+
+            <!-- Active Collaborators Stack -->
+            <div id="live-peers-container" class="live-peers-container">
+                <div id="peer-avatars-list" class="peer-avatars-list"></div>
+                <span id="online-count-badge" class="online-count-badge" title="Collaborators currently active (Click name/avatar to chat)">
+                    <span class="online-indicator-dot"></span>
+                    <span id="online-count-text">1 Online</span>
+                </span>
+            </div>
+
+            <div class="hud-divider"></div>
+
+            <!-- WebRTC P2P Voice Walkie-Talkie Button -->
+            <button id="hud-voice-btn" class="hud-voice-btn" title="WebRTC Encrypted P2P Voice (Click to toggle mic, Hold space to talk)">
+                <span class="voice-mic-icon">🎙️</span>
+                <span id="hud-voice-status">Voice</span>
+            </button>
+
+            <!-- Real-Time Cursor Emoji Flare Bar -->
+            <div id="flare-bar" class="flare-bar" title="Send Floating Emoji Flare to Collaborators (Ctrl+1..5)">
+                <span class="flare-btn" data-emoji="🔥">🔥</span>
+                <span class="flare-btn" data-emoji="💡">💡</span>
+                <span class="flare-btn" data-emoji="🚀">🚀</span>
+                <span class="flare-btn" data-emoji="🔒">🔒</span>
+                <span class="flare-btn" data-emoji="👏">👏</span>
+            </div>
+
+            <div class="hud-divider"></div>
+
+            <!-- Collaborator Laser Pointer Toggle -->
+            <button id="hud-laser-btn" class="hud-tool-btn" title="Toggle Real-Time Collaborator Laser Pointer (Alt+L)">
+                <span>🔦 Laser</span>
+            </button>
+
+            <!-- Live Code Runner Toggle -->
+            <button id="hud-runner-btn" class="hud-tool-btn" title="Live Sandboxed Code Runner (⌘Enter)">
+                <span>▶️ Run</span>
+            </button>
+        </div>
+
+        <div class="hud-right-section">
+            <div id="hud-timer-badge" class="hud-timer-badge hidden" title="Workspace Self-Destruct Countdown">
+                ⏳ <span id="hud-timer-val">00:00</span>
+            </div>
+            
+            <!-- Real-Time WPM Typing Momentum Gauge -->
+            <div class="hud-stat" id="hud-wpm-container" title="Real-Time Typing Speed">
+                ⚡ <span id="hud-wpm">0</span> WPM
+            </div>
+
+            <!-- Interactive Task Progress Meter -->
+            <div class="hud-stat hidden" id="hud-tasks-container" title="Markdown Checklist Progress">
+                <span id="hud-tasks">0/0</span>
+            </div>
+
+            <div id="hud-security-pill" class="hud-sec-pill">🔒 AES-256 E2EE</div>
+            <div class="hud-stat"><span id="hud-chars">0</span> chars</div>
+            <div class="hud-stat"><span id="hud-words">0</span> words</div>
+            <div class="hud-stat"><span id="hud-read">0</span> min read</div>
+        </div>
+    </div>
+
+    <!-- Direct Messaging UI -->
+    <div id="dm-window" class="hidden">
+        <div class="dm-header">
+            <div class="dm-header-left">
+                <span class="dm-status-dot"></span>
+                <span id="dm-title">Encrypted DM</span>
+            </div>
+            <span id="close-dm" class="close-btn" title="Close Chat">&times;</span>
+        </div>
+        <div class="dm-security-banner">
+            🔒 RSA-OAEP 2048-bit Encrypted
+        </div>
+        <div id="dm-messages"></div>
+        <div class="dm-input-area">
+            <input type="text" id="dm-input" placeholder="Type an encrypted message..." autocomplete="off">
+            <button id="dm-send" class="btn primary-action">Send</button>
+        </div>
+    </div>
+
+    <!-- Command Palette Modal -->
+    <div id="cmd-palette-modal" class="modal hidden">
+        <div class="modal-content cmd-palette-content">
+            <div class="cmd-input-wrapper">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="cmd-input" placeholder="Type a command or search tabs..." autocomplete="off">
+            </div>
+            <div id="cmd-results" class="cmd-results-list"></div>
+            <div class="cmd-footer">
+                <span><kbd>↑</kbd> <kbd>↓</kbd> to navigate</span>
+                <span><kbd>Enter</kbd> to execute</span>
+                <span><kbd>Esc</kbd> to dismiss</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Modal -->
+    <div id="profile-modal" class="modal hidden">
+        <div class="modal-content modal-standard">
+            <span id="close-profile" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">User Profile</h2>
+            <p class="modal-subtitle">Customize how you appear to collaborators in real time.</p>
+            
+            <div class="profile-preview-card">
+                <div id="profile-preview-avatar" class="profile-preview-avatar" title="Click to upload photo from your device">👤</div>
+                <div class="profile-preview-info">
+                    <div id="profile-preview-name" class="profile-preview-name">Anon</div>
+                    <div class="profile-preview-status">🟢 Active in workspace</div>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 14px;">
+                <label for="profile-name-input">Display Name</label>
+                <input type="text" id="profile-name-input" placeholder="e.g. Satoshi" maxlength="15" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+                <label>Avatar Photo (Computer or Phone)</label>
+                <div class="avatar-upload-actions">
+                    <label for="profile-avatar-file-input" class="avatar-file-label" title="Upload a photo from your computer or phone">
+                        <span>📷 Upload Photo from Device</span>
+                        <input type="file" id="profile-avatar-file-input" accept="image/png, image/jpeg, image/webp, image/gif" style="display:none;">
+                    </label>
+                    <button type="button" id="profile-avatar-clear-btn" class="avatar-clear-btn hidden" title="Clear custom photo and reset to default">✖ Clear Photo</button>
+                </div>
+                <span class="input-hint">Choose any image from your device or phone camera. Automatically cropped & optimized.</span>
+            </div>
+
+            <div class="form-group">
+                <label>Or Quick Avatar Emoji</label>
+                <div class="avatar-presets-row">
+                    <button type="button" class="avatar-preset-btn" data-avatar="🥷">🥷</button>
+                    <button type="button" class="avatar-preset-btn" data-avatar="🦊">🦊</button>
+                    <button type="button" class="avatar-preset-btn" data-avatar="🤖">🤖</button>
+                    <button type="button" class="avatar-preset-btn" data-avatar="🐱">🐱</button>
+                    <button type="button" class="avatar-preset-btn" data-avatar="🚀">🚀</button>
+                    <button type="button" class="avatar-preset-btn" data-avatar="⚡">⚡</button>
+                    <button type="button" class="avatar-preset-btn" data-avatar="👾">👾</button>
+                    <button type="button" class="avatar-preset-btn" data-avatar="🔮">🔮</button>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="profile-avatar-input">Or Image Link / URL (Optional)</label>
+                <input type="url" id="profile-avatar-input" placeholder="https://example.com/avatar.png" autocomplete="off">
+                <span class="input-hint">Direct link to any PNG/JPG image or GIF online.</span>
+            </div>
+            
+            <button id="save-profile-btn" class="btn primary-action btn-full" style="padding:12px; font-size:1rem; margin-top:8px;">Save Profile</button>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div id="qr-modal" class="modal hidden">
+        <div class="modal-content modal-standard text-center">
+            <span id="close-qr" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">Mobile Access</h2>
+            <p class="modal-subtitle">Scan with your phone camera to open this encrypted pad instantly.</p>
+            <div class="qr-wrapper">
+                <img id="qr-code-img" src="" alt="Workspace QR Code">
+            </div>
+            <p class="input-hint" style="margin-top:12px;">Zero-knowledge key is embedded in the hash link.</p>
+        </div>
+    </div>
+
+    <!-- About / Info Modal -->
+    <div id="info-modal" class="modal hidden">
+        <div class="modal-content modal-standard info-modal-content">
+            <span id="close-info" class="close-btn">&times;</span>
+            <div class="text-center" style="margin-bottom: 20px;">
+                <div class="splash-badge" style="display:inline-block;margin-bottom:8px;">VERSION 2.5 NEXT-GEN</div>
+                <h2 class="neon-text" style="font-size: 1.8rem; margin-bottom: 4px;">Quick-Pad</h2>
+                <p style="color: var(--primary-color); font-family: monospace; font-size: 0.85rem;">Zero-Knowledge Real-Time Scratchpad • Created by HattyHats</p>
+            </div>
+            
+            <p class="info-intro">QuickPad is a hyper-fast, serverless scratchpad that syncs instantly across your devices. Engineered for pure speed and absolute privacy: <strong>no accounts, no trackers, and no server-side plaintext storage</strong>. Open the link, type, and share.</p>
+            
+            <div class="feature-section-title">✨ Key Features & Capabilities</div>
+            <ul class="feature-list">
+                <li>🔒 <strong>Zero-Knowledge Architecture:</strong> AES-256 encryption keys are generated locally and stored exclusively in the URL hash (`#`). They never touch the server.</li>
+                <li>⚡ <strong>Real-Time Live Collaboration:</strong> Peer keystrokes, remote cursor positions, collaborator avatars, and live typing indicators update with ultra-low latency.</li>
+                <li>🎙️ <strong>Encrypted P2P Voice Walkie-Talkie:</strong> Push-to-talk WebRTC audio channel directly between active collaborators with audio visualizer ring.</li>
+                <li>🎉 <strong>Live Cursor Emoji Flares:</strong> Send floating reaction particles (`🔥 💡 🚀 🔒 👏` or `Ctrl+1..5`) rising straight from your collaborator cursor in real time.</li>
+                <li>🎨 <strong>Encrypted Neon Whiteboard:</strong> Create `.draw` tabs to sketch diagrams, wireframes, and handwritten notes on an encrypted HTML5 canvas with neon colors and pen/highlighter/eraser tools.</li>
+                <li>🔊 <strong>Synthesized Mechanical Switch Audio:</strong> Pure Web Audio API procedural sound engine with Thock, Click, IBM Model M, and Cyber sound profiles.</li>
+                <li>⚡ <strong>Cipher Glitch & WPM Streak:</strong> Hollywood-style matrix decryption effect on note load, plus real-time typing speed gauge with blazing cyan fire mode at 80+ WPM.</li>
+                <li>🕶️ <strong>Stealth Camouflage & Duress Decoy:</strong> Instant Panic Boss Key (`Alt+P` or double-tap `Esc`) swaps to a realistic office document. Duress PIN unlocks a benign decoy vault under coercion.</li>
+                <li>🖼️ <strong>Zero-Knowledge Image Paste & Drop:</strong> Paste screenshots or drag images directly into notes; automatically optimized and encrypted with AES-256.</li>
+                <li>🔐 <strong>Self-Decrypting HTML Exporter:</strong> Export notes as standalone zero-dependency encrypted `.html` files that decrypt locally in any browser with your passphrase.</li>
+                <li>☑️ <strong>Interactive Task Progress:</strong> Live HUD counter detects markdown `- [ ]` checkboxes and displays real-time completion percentages.</li>
+                <li>🔍 <strong>Find & Replace (`⌘F` / `Ctrl+F`):</strong> Fast in-document search with match navigation and single/bulk replace.</li>
+                <li>⌨️ <strong>Command Palette (`⌘K` / `Ctrl+K`):</strong> Instant access to all actions, commands, and tab switching via keyboard.</li>
+                <li>📁 <strong>Import & Export:</strong> Export your notes as `.md`, `.txt`, `.html`, or `.json` workspace backups.</li>
+                <li>💬 <strong>Secure Peer DMs:</strong> RSA-OAEP 2048-bit encrypted direct messaging. Click any collaborator in the presence bar to chat privately.</li>
+                <li>🔥 <strong>Self-Destruct & Burn Notes:</strong> Set timed auto-destruct workspaces or one-time burn links that wipe from the database the moment they are opened.</li>
+            </ul>
+            
+            <div class="feature-section-title sec-header">🛡️ Cryptographic Security Architecture</div>
+            <p class="info-sec-desc">All workspace content is encrypted locally using <strong>AES-256 (CBC)</strong> prior to transport. The database only acts as an encrypted relay and stores ciphertext. Direct messages utilize <strong>RSA-OAEP 2048-bit with SHA-256</strong> with hybrid AES session keys generated on device. No unencrypted content ever touches the wire.</p>
+            
+            <div class="info-footer">
+                Information should be free. Build things that empower people.
+            </div>
+        </div>
+    </div>
+
+    <!-- Zen Exit Button -->
+    <button id="zen-exit-btn" title="Exit Zen Mode (Esc)">
+        <span>❌ Exit Zen Mode</span>
+    </button>
+
+    <!-- Share Modal -->
+    <div id="share-modal" class="modal hidden">
+        <div class="modal-content modal-standard">
+            <span id="close-share" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">Share Workspace</h2>
+            <p class="modal-subtitle">Collaborate live in real-time or share read-only notes with zero-knowledge privacy.</p>
+            
+            <div class="form-group">
+                <label for="share-edit-link">✏️ Full Collaboration Link (Read & Write)</label>
+                <div class="copy-input-row">
+                    <input type="text" id="share-edit-link" readonly class="share-url-input">
+                    <button id="copy-edit-link" class="btn primary-action" title="Copy Full Access Link">📋 Copy</button>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-top:14px;">
+                <label for="share-view-link" style="color: #ffb000;">👁️ Read-Only Link (View Only)</label>
+                <div class="copy-input-row">
+                    <input type="text" id="share-view-link" readonly class="share-url-input readonly-accent">
+                    <button id="copy-view-link" class="btn primary-action" title="Copy Read-Only Link">📋 Copy</button>
+                </div>
+            </div>
+
+            <div class="share-qr-section">
+                <div class="menu-label" style="margin-bottom: 8px;">Mobile QR Code</div>
+                <div class="qr-wrapper-mini">
+                    <img id="share-qr-img" src="" alt="Workspace QR Code" class="share-qr-img">
+                </div>
+                <span class="input-hint">Scan with any phone camera to open on mobile.</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Merge Conflict Modal -->
+    <div id="merge-modal" class="modal hidden">
+        <div class="modal-content merge-modal-content">
+            <span id="close-merge" class="close-btn">&times;</span>
+            <h2 class="neon-text" style="font-size: 1.8rem; margin-bottom: 8px; color: #ff003c;">Sync Conflict Detected</h2>
+            <p class="modal-subtitle">While you were offline, this document was updated remotely. Review and merge below.</p>
+            
+            <div class="merge-columns">
+                <div class="merge-col">
+                    <h3 style="color: #00ff00; font-family: monospace; font-size: 0.9rem; margin-bottom: 8px;">Remote Server Version</h3>
+                    <textarea id="merge-server-text" readonly class="merge-textarea server-version"></textarea>
+                </div>
+                <div class="merge-col">
+                    <h3 style="color: var(--primary-color); font-family: monospace; font-size: 0.9rem; margin-bottom: 8px;">Your Offline Version</h3>
+                    <textarea id="merge-local-text" readonly class="merge-textarea local-version"></textarea>
+                </div>
+            </div>
+
+            <h3 style="color: #fff; font-family: monospace; font-size: 0.9rem; margin: 15px 0 8px 0;">Merged Content (Editable)</h3>
+            <textarea id="merge-final-text" class="merge-textarea final-version"></textarea>
+            
+            <button id="btn-merge-approve" class="btn primary-action btn-full" style="margin-top:15px; padding:12px; font-size:1.05rem;">Apply Merged Version & Save</button>
+        </div>
+    </div>
+
+    <!-- Custom Prompt / Dialog Modal -->
+    <div id="custom-dialog-modal" class="modal hidden">
+        <div class="modal-content modal-standard">
+            <span id="close-custom-dialog" class="close-btn">&times;</span>
+            <h2 id="dialog-title" class="neon-text modal-title">Input Required</h2>
+            <p id="dialog-message" class="modal-subtitle">Please enter a value:</p>
+            <div class="form-group">
+                <input type="text" id="dialog-input" autocomplete="off">
+            </div>
+            <div class="dialog-actions">
+                <button id="dialog-cancel-btn" class="btn">Cancel</button>
+                <button id="dialog-confirm-btn" class="btn primary-action">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Collaborators Modal -->
+    <div id="collaborators-modal" class="modal hidden">
+        <div class="modal-content modal-standard">
+            <span id="close-collaborators" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">Active Collaborators</h2>
+            <p class="modal-subtitle">Collaborators currently connected to this workspace:</p>
+            <div id="collaborators-list" class="collaborators-list-container">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Duress PIN / Decoy Vault Modal -->
+    <div id="duress-modal" class="modal hidden">
+        <div class="modal-content modal-standard">
+            <span id="close-duress" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">🛡️ Duress PIN (Decoy Vault)</h2>
+            <p class="modal-subtitle">Configure a covert Duress PIN. If someone forces you to unlock your pad, entering this PIN opens an innocent decoy note while keeping your real data completely secret.</p>
+            
+            <div class="form-group">
+                <label for="duress-pin-input">Duress / Decoy Password or PIN</label>
+                <input type="password" id="duress-pin-input" placeholder="e.g. 9999 or decoypass">
+            </div>
+            <div class="form-group">
+                <label for="duress-content-input">Decoy Note Content (Innocent Text)</label>
+                <textarea id="duress-content-input" rows="5" class="modal-textarea" placeholder="Biology 101 Lecture Notes - Chapter 3 Cell Division & Mitochondria..."></textarea>
+            </div>
+            
+            <div class="dialog-actions">
+                <button id="duress-clear-btn" class="btn">Clear PIN</button>
+                <button id="duress-save-btn" class="btn primary-action">Save Duress Config</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ghost Image Steganography Modal -->
+    <div id="steg-modal" class="modal hidden">
+        <div class="modal-content modal-standard steg-modal-content">
+            <span id="close-steg" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">🖼️ Ghost Image Steganography</h2>
+            <p class="modal-subtitle">Conceal encrypted notes inside ordinary PNG images using LSB pixel encoding.</p>
+            
+            <div class="steg-tabs">
+                <button type="button" id="steg-tab-hide" class="steg-tab-btn active">🔒 Hide Secret in Image</button>
+                <button type="button" id="steg-tab-extract" class="steg-tab-btn">🔓 Reveal from Image</button>
+            </div>
+
+            <!-- Hide Panel -->
+            <div id="steg-panel-hide" class="steg-panel">
+                <div class="form-group">
+                    <label>1. Carrier Image</label>
+                    <div class="steg-dropzone" id="steg-carrier-dropzone">
+                        <canvas id="steg-canvas" class="steg-preview-canvas" width="320" height="240"></canvas>
+                        <div class="steg-drop-text">Click or drop an image here to use as carrier, or:</div>
+                        <div class="steg-actions-row">
+                            <label for="steg-carrier-file" class="btn steg-btn">📁 Select Image</label>
+                            <input type="file" id="steg-carrier-file" accept="image/png,image/jpeg,image/webp" style="display:none;">
+                            <button type="button" id="steg-gen-pattern-btn" class="btn">⚡ Generate Cyber Pattern</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="steg-hide-text">2. Secret Text to Conceal</label>
+                    <textarea id="steg-hide-text" rows="4" class="modal-textarea" placeholder="Enter secret text to conceal inside image..."></textarea>
+                    <button type="button" id="steg-load-current-btn" class="btn btn-sm" style="margin-top:6px; font-size:0.8rem; padding:4px 10px;">Use Current Tab Note</button>
+                </div>
+                <div class="form-group">
+                    <label for="steg-hide-pass">3. Optional AES-256 Passphrase</label>
+                    <input type="password" id="steg-hide-pass" placeholder="Leave empty for unencrypted embed, or enter password...">
+                </div>
+                <button id="steg-encode-btn" class="btn primary-action btn-full" style="padding:12px;font-size:1.05rem;">🔒 Embed Secret & Download Ghost PNG</button>
+            </div>
+
+            <!-- Extract Panel -->
+            <div id="steg-panel-extract" class="steg-panel hidden">
+                <div class="form-group">
+                    <label>Select or Drop Ghost PNG Image</label>
+                    <div class="steg-dropzone" id="steg-reveal-dropzone">
+                        <img id="steg-reveal-preview" class="steg-preview-img hidden" alt="Ghost Preview">
+                        <div class="steg-drop-text" id="steg-reveal-prompt">Drag & drop your Ghost PNG here, or select file</div>
+                        <label for="steg-reveal-file" class="btn steg-btn" style="margin-top:8px;">📂 Choose Ghost Image</label>
+                        <input type="file" id="steg-reveal-file" accept="image/png,image/webp" style="display:none;">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="steg-reveal-pass">Decryption Passphrase (If password-protected)</label>
+                    <input type="password" id="steg-reveal-pass" placeholder="Enter passphrase if required...">
+                </div>
+                <div id="steg-extracted-container" class="form-group hidden">
+                    <label style="color:#00ff66;">Extracted Secret Message:</label>
+                    <textarea id="steg-extracted-text" rows="5" class="modal-textarea" readonly></textarea>
+                    <div class="steg-actions-row" style="margin-top:8px; display:flex; gap:8px;">
+                        <button type="button" id="steg-load-editor-btn" class="btn primary-action">Insert into Current Tab</button>
+                        <button type="button" id="steg-new-tab-btn" class="btn">Open as New Tab</button>
+                    </div>
+                </div>
+                <button id="steg-decode-btn" class="btn primary-action btn-full" style="padding:12px;font-size:1.05rem;">🔓 Extract Hidden Secret</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebRTC P2P Wormhole File Beam Modal -->
+    <div id="wormhole-modal" class="modal hidden">
+        <div class="modal-content modal-standard">
+            <span id="close-wormhole" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">⚡ P2P Wormhole File Beam</h2>
+            <p class="modal-subtitle">Direct browser-to-browser encrypted file transfer. Unlimited size, 0% server storage, instant P2P beam.</p>
+
+            <div class="form-group">
+                <label>1. Select Collaborator to Beam To</label>
+                <div id="wormhole-peers-list" class="wormhole-peers-list">
+                    <div class="wormhole-empty-peers">No other peers currently connected to this workspace. Share your link with a peer first!</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>2. Choose File (Any type & size: ZIP, MP4, PDF, etc.)</label>
+                <div class="wormhole-dropzone" id="wormhole-dropzone">
+                    <div id="wormhole-file-meta" class="wormhole-file-meta hidden">
+                        <span id="wormhole-file-name" class="wormhole-name">file.zip</span>
+                        <span id="wormhole-file-size" class="wormhole-size">0 MB</span>
+                    </div>
+                    <div id="wormhole-drop-prompt">Drag & drop file here or click to browse</div>
+                    <label for="wormhole-file-input" class="btn" style="margin-top:8px;">Choose File</label>
+                    <input type="file" id="wormhole-file-input" style="display:none;">
+                </div>
+            </div>
+
+            <!-- Transfer Status & Progress -->
+            <div id="wormhole-progress-container" class="wormhole-progress-container hidden">
+                <div class="wormhole-progress-labels">
+                    <span id="wormhole-status-text">Connecting peer channel...</span>
+                    <span id="wormhole-percentage">0%</span>
+                </div>
+                <div class="wormhole-progress-bar">
+                    <div id="wormhole-progress-fill" class="wormhole-progress-fill"></div>
+                </div>
+                <div id="wormhole-speed-text" class="wormhole-speed">0 KB/s</div>
+            </div>
+
+            <button id="wormhole-send-btn" class="btn primary-action btn-full" style="padding:12px;font-size:1.05rem;">⚡ Select a File to Beam</button>
+        </div>
+    </div>
+
+    <!-- Stealth Panic Camouflage Overlay (Alt+P or Double-Tap Esc) -->
+    <div id="panic-overlay" class="panic-overlay hidden">
+        <div class="panic-doc-header">
+            <div class="panic-doc-logo">📄</div>
+            <div class="panic-doc-meta">
+                <div class="panic-doc-title">Project Status & Client Sync - Q3 Quarterly Review</div>
+                <div class="panic-doc-menu">
+                    <span>File</span><span>Edit</span><span>View</span><span>Insert</span><span>Format</span><span>Tools</span><span>Extensions</span><span>Help</span>
+                </div>
+            </div>
+        </div>
+        <div class="panic-doc-body">
+            <div class="panic-page">
+                <h2>Project Roadmap & Executive Summary</h2>
+                <p>This document details cross-department milestones, quarterly objectives, and resource allocation across regional branches.</p>
+                <hr style="border:none; border-top:1px solid #e2e8f0; margin: 16px 0;">
+                <h3>Key Milestones</h3>
+                <ul>
+                    <li>Finalize cloud infrastructure optimization report</li>
+                    <li>Align staging compliance with Q3 governance frameworks</li>
+                    <li>Update client billing cycles and regional branch forecasts</li>
+                    <li>Schedule cross-team retrospective and product backlog grooming</li>
+                </ul>
+                <p>All action items must be submitted prior to Friday's executive sync session.</p>
+            </div>
+        </div>
+        <button id="panic-exit-btn" class="panic-exit-btn" title="Click or press Alt+P to return to QuickPad">QuickPad Active (Click to return)</button>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
+    <script src="app.js?v=35"></script>
+    <script>
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(() => console.log('QuickPad SW active.'))
+                    .catch(err => console.warn('SW registration warning:', err));
+            });
+        }
+    </script>
+</body>
+</html>
