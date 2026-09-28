@@ -4,7 +4,7 @@ QuickPad is a hyper-fast, serverless, real-time scratchpad built for absolute pr
 
 Because QuickPad uses **Zero-Knowledge Architecture**, your notes, files, drawings, and direct messages are encrypted locally on your device using **AES-256** before they ever reach the relay server. Even the database administrator cannot read your data.
 
-### 🌐 Live Demo: https://hatsquickpad.netlify.app/
+### 🌐 Live Demo: https://quickpad.org/
 
 ---
 
