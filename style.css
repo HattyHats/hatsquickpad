@@ -143,6 +143,8 @@ body, html {
     overflow-x: auto;
     scrollbar-width: none;
     padding: 2px 0;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 #tabs-bar::-webkit-scrollbar { display: none; }
 
@@ -150,6 +152,7 @@ body, html {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-shrink: 0;
 }
 
 .tab {

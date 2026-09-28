@@ -838,13 +838,6 @@
         }
         window.addEventListener('resize', resizeWbCanvas);
 
-        function saveWbHistory() {
-            if (whiteboardCanvas.width > 0 && whiteboardCanvas.height > 0) {
-                wbHistory.push(wbCtx.getImageData(0, 0, whiteboardCanvas.width, whiteboardCanvas.height));
-                if (wbHistory.length > 20) wbHistory.shift();
-            }
-        }
-
         function startDraw(e) {
             wbIsDrawing = true;
             saveWbHistory();
@@ -946,8 +939,21 @@
         }
     }
 
+    let wbIsLoading = false;
+
+    function saveWbHistory() {
+        if (!whiteboardCanvas || !wbCtx) return;
+        if (whiteboardCanvas.width > 0 && whiteboardCanvas.height > 0) {
+            wbHistory.push(wbCtx.getImageData(0, 0, whiteboardCanvas.width, whiteboardCanvas.height));
+            if (wbHistory.length > 20) wbHistory.shift();
+        }
+    }
+
     function saveWhiteboardToTab() {
-        if (!whiteboardCanvas || !activeTabId || !tabsData[activeTabId]) return;
+        if (!whiteboardCanvas || !activeTabId || !tabsData[activeTabId] || wbIsLoading) return;
+        const isDraw = tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
+        if (!isDraw) return;
+        if (whiteboardCanvas.width <= 0 || whiteboardCanvas.height <= 0) return;
         const dataUrl = whiteboardCanvas.toDataURL('image/png');
         tabsData[activeTabId].content = dataUrl;
         saveWorkspace();
@@ -955,16 +961,30 @@
 
     function loadWhiteboardFromTab(dataUrl) {
         if (!whiteboardCanvas || !wbCtx) return;
-        const rect = canvasContainer ? canvasContainer.getBoundingClientRect() : { width: 800, height: 600 };
-        whiteboardCanvas.width = rect.width;
-        whiteboardCanvas.height = rect.height - 42;
+        const rect = canvasContainer ? canvasContainer.getBoundingClientRect() : null;
+        const targetW = (rect && rect.width > 50) ? rect.width : (window.innerWidth || 800);
+        const targetH = (rect && rect.height > 90) ? (rect.height - 42) : Math.max(300, window.innerHeight - 100);
+
+        whiteboardCanvas.width = targetW;
+        whiteboardCanvas.height = targetH;
         wbCtx.clearRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+        wbHistory = [];
+
         if (dataUrl && dataUrl.startsWith('data:image/')) {
+            wbIsLoading = true;
             const img = new Image();
             img.onload = () => {
                 wbCtx.drawImage(img, 0, 0);
+                saveWbHistory();
+                wbIsLoading = false;
+            };
+            img.onerror = () => {
+                wbIsLoading = false;
             };
             img.src = dataUrl;
+        } else {
+            wbIsLoading = false;
+            saveWbHistory();
         }
     }
 
@@ -1838,7 +1858,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                                     }
                                                 }
                                             } else {
-                                                const disambiguatedName = `${serverTabs[dupTid].name.replace(/\.[^/.]+$/, '')}-2.txt`;
+                                                const extMatch = (serverTabs[dupTid].name || '').match(/\.[^/.]+$/);
+                                                const ext = extMatch ? extMatch[0] : '.txt';
+                                                const base = (serverTabs[dupTid].name || 'tab').replace(/\.[^/.]+$/, '');
+                                                const disambiguatedName = `${base}-2${ext}`;
                                                 serverTabs[dupTid].name = disambiguatedName;
                                                 if (tabsData[dupTid]) {
                                                     tabsData[dupTid].name = disambiguatedName;
@@ -1882,14 +1905,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         setTimeout(saveWorkspace, 100);
                                     } else if (serverChanged && !localChanged) {
                                         tabsData[tid].content = content; 
-                                        if (tid === activeTabId && !isTyping && editor) {
-                                            let cursor = editor.selectionStart || 0;
-                                            editor.value = content;
-                                            editor.readOnly = isReadOnly;
-                                            const safePos = Math.min(cursor, content.length);
-                                            editor.setSelectionRange(safePos, safePos);
-                                            updatePreview();
-                                            updateHUD(); 
+                                        if (tid === activeTabId && !isTyping) {
+                                            const isDraw = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
+                                            if (isDraw) {
+                                                loadWhiteboardFromTab(content);
+                                            } else if (editor) {
+                                                let cursor = editor.selectionStart || 0;
+                                                editor.value = content;
+                                                editor.readOnly = isReadOnly;
+                                                const safePos = Math.min(cursor, content.length);
+                                                editor.setSelectionRange(safePos, safePos);
+                                                updatePreview();
+                                                updateHUD(); 
+                                            }
                                         }
                                     }
                                 }
@@ -1919,7 +1947,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 if (!tabsData[activeTabId]) {
                                     tabsData[activeTabId] = { name: 'main.txt', content: '', is_encrypted: false };
                                 }
-                                if (editor) {
+                                const isDraw = tabsData[firstTab] && tabsData[firstTab].name && tabsData[firstTab].name.endsWith('.draw');
+                                if (isDraw) {
+                                    switchTab(firstTab, true);
+                                } else if (editor) {
                                     editor.value = tabsData[firstTab].content || '';
                                     editor.readOnly = isReadOnly;
                                 }
@@ -2151,12 +2182,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             t.appendChild(delBtn);
             tabsContainer.appendChild(t);
         }
+        const activeTabEl = tabsContainer.querySelector('.tab.active');
+        if (activeTabEl && tabsBar) {
+            activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
     }
 
     function switchTab(tid, skipSave = false) {
         if (activeTabId !== tid && activeTabId && tabsData[activeTabId]) {
             if (tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw')) {
-                saveWhiteboardToTab();
+                if (whiteboardCanvas && whiteboardCanvas.width > 0 && whiteboardCanvas.height > 0 && !wbIsLoading) {
+                    tabsData[activeTabId].content = whiteboardCanvas.toDataURL('image/png');
+                }
             } else if (editor) {
                 tabsData[activeTabId].content = editor.value;
             }
@@ -2226,7 +2263,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             }
         }
         try {
-            tabsData[activeTabId].content = editor.value;
+            const isDraw = tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
+            if (isDraw) {
+                if (whiteboardCanvas && whiteboardCanvas.width > 0 && whiteboardCanvas.height > 0 && !wbIsLoading) {
+                    tabsData[activeTabId].content = whiteboardCanvas.toDataURL('image/png');
+                }
+            } else {
+                tabsData[activeTabId].content = editor.value;
+            }
             
             const payload = {
                 is_encrypted: !!vaultPassword,
