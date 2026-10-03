@@ -48,7 +48,6 @@
     const instantBurnBtn = document.getElementById('instant-burn-btn');
     const newBtn = document.getElementById('new-btn');
     const timerBtn = document.getElementById('timer-btn');
-    const qrBtn = document.getElementById('qr-btn');
     const nameBtn = document.getElementById('name-btn');
     const infoBtn = document.getElementById('info-btn');
     const zenBtn = document.getElementById('zen-btn');
@@ -72,7 +71,6 @@
     const noteImageFileInput = document.getElementById('note-image-file-input');
 
     // --- Modals ---
-    const qrModal = document.getElementById('qr-modal');
     const infoModal = document.getElementById('info-modal');
     const shareModal = document.getElementById('share-modal');
     const profileModal = document.getElementById('profile-modal');
@@ -83,7 +81,6 @@
     const collaboratorsList = document.getElementById('collaborators-list');
 
     // --- Modal Close Buttons ---
-    const closeQr = document.getElementById('close-qr');
     const closeInfo = document.getElementById('close-info');
     const closeShare = document.getElementById('close-share');
     const closeProfile = document.getElementById('close-profile');
@@ -186,6 +183,8 @@
     // --- HUD Enhancements & Voice Walkie-Talkie ---
     const hudVoiceBtn = document.getElementById('hud-voice-btn');
     const hudVoiceStatus = document.getElementById('hud-voice-status');
+    const hudDictateBtn = document.getElementById('hud-dictate-btn');
+    const hudDictateStatus = document.getElementById('hud-dictate-status');
     const flareBar = document.getElementById('flare-bar');
     const flareBtns = document.querySelectorAll('.flare-btn');
     const hudWpmContainer = document.getElementById('hud-wpm-container');
@@ -343,6 +342,8 @@
     let localAudioStream = null;
     let isVoiceActive = false;
     let isVoiceTransmitting = false;
+    let isDictating = false;
+    let recognition = null;
     let voicePeerConnections = {};
 
     // User Profile
@@ -841,6 +842,7 @@
         function startDraw(e) {
             wbIsDrawing = true;
             saveWbHistory();
+            strokeBatch = []; // reset batch on new stroke
             draw(e);
         }
 
@@ -849,6 +851,11 @@
             wbIsDrawing = false;
             wbCtx.beginPath();
             saveWhiteboardToTab();
+            if (strokeBatchTimeout) {
+                clearTimeout(strokeBatchTimeout);
+                strokeBatchTimeout = null;
+            }
+            broadcastStrokes();
         }
 
         function draw(e) {
@@ -878,6 +885,16 @@
             wbCtx.stroke();
             wbCtx.beginPath();
             wbCtx.moveTo(x, y);
+
+            if (typeof strokeBatch !== 'undefined') {
+                strokeBatch.push({ x: Math.round(x), y: Math.round(y) });
+                if (!strokeBatchTimeout) {
+                    strokeBatchTimeout = setTimeout(() => {
+                        broadcastStrokes();
+                        strokeBatchTimeout = null;
+                    }, 250);
+                }
+            }
         }
 
         whiteboardCanvas.addEventListener('mousedown', startDraw);
@@ -974,9 +991,11 @@
             wbIsLoading = true;
             const img = new Image();
             img.onload = () => {
-                wbCtx.drawImage(img, 0, 0);
-                saveWbHistory();
-                wbIsLoading = false;
+                setTimeout(() => {
+                    wbCtx.drawImage(img, 0, 0);
+                    saveWbHistory();
+                    wbIsLoading = false;
+                }, 50);
             };
             img.onerror = () => {
                 wbIsLoading = false;
@@ -1078,6 +1097,88 @@
             setPushToTalk(false);
         }
     });
+
+    // 10.5 --- Private On-Device Speech Dictation ---
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+            isDictating = true;
+            if (hudDictateBtn) hudDictateBtn.classList.add('active');
+            if (hudDictateStatus) hudDictateStatus.innerText = "Listening...";
+            showToast("🗣️ Speech Dictation Active", 'success');
+        };
+
+        recognition.onresult = (event) => {
+            if (!editor || isReadOnly || isBurnMode || (tabsData[activeTabId] && tabsData[activeTabId].name.endsWith('.draw'))) return;
+            
+            let interimTranscript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    const text = event.results[i][0].transcript;
+                    const cursor = editor.selectionStart || 0;
+                    editor.value = editor.value.substring(0, cursor) + text + ' ' + editor.value.substring(editor.selectionEnd || cursor);
+                    editor.selectionStart = editor.selectionEnd = cursor + text.length + 1;
+                    if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+                    if (typeof debouncedSave === 'function') debouncedSave();
+                    else saveWorkspace();
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+            if (hudDictateStatus && interimTranscript) {
+                hudDictateStatus.innerText = interimTranscript.substring(0, 15) + '...';
+            } else if (hudDictateStatus) {
+                hudDictateStatus.innerText = "Listening...";
+            }
+        };
+
+        recognition.onerror = (event) => {
+            console.error('Speech recognition error', event.error);
+            showToast("Dictation error: " + event.error, 'error');
+            stopDictation();
+        };
+
+        recognition.onend = () => {
+            if (isDictating) {
+                try { recognition.start(); } catch(e) {}
+            } else {
+                stopDictation();
+            }
+        };
+
+        function stopDictation() {
+            isDictating = false;
+            try { recognition.stop(); } catch(e) {}
+            if (hudDictateBtn) hudDictateBtn.classList.remove('active');
+            if (hudDictateStatus) hudDictateStatus.innerText = "Dictate";
+        }
+
+        if (hudDictateBtn) {
+            hudDictateBtn.addEventListener('click', () => {
+                if (isDictating) {
+                    stopDictation();
+                    showToast("Speech Dictation Stopped", 'info');
+                } else {
+                    try {
+                        recognition.start();
+                    } catch(e) {
+                        showToast("Could not start dictation. Ensure mic permissions are granted.", 'error');
+                    }
+                }
+            });
+        }
+    } else {
+        if (hudDictateBtn) {
+            hudDictateBtn.addEventListener('click', () => {
+                showToast("Speech Recognition not supported in this browser.", 'error');
+            });
+        }
+    }
 
     // 11. --- Standalone Encrypted Self-Decrypting HTML Exporter ---
     async function exportStandaloneEncryptedHtml() {
@@ -1746,6 +1847,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     function setupRealtimeSync(token) {
         if (!db) return;
         if (unsubscribeWorkspace) unsubscribeWorkspace();
+        initStrokesListener();
         
         try {
             unsubscribeWorkspace = db.collection("workspaces").doc(token).onSnapshot((docSnap) => {
@@ -1802,10 +1904,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             for (let tid in serverTabs) {
                                 let sTab = serverTabs[tid];
                                 let content = sTab.content || '';
-                                if (data.is_encrypted && content.startsWith("U2FsdGVkX1")) {
+                                if (data.is_encrypted && content.startsWith("U2FsdGVkX1") && !sTab.is_secret) {
                                     if (vaultPassword && typeof CryptoJS !== 'undefined') {
                                         try {
                                             const bytes = CryptoJS.AES.decrypt(content, vaultPassword);
+                                            const dec = bytes.toString(CryptoJS.enc.Utf8);
+                                            if (!(dec === "" && bytes.sigBytes < 0)) content = dec;
+                                        } catch(e) {}
+                                    }
+                                }
+                                if (sTab.is_secret && content.startsWith("U2FsdGVkX1")) {
+                                    if (tabsData[tid] && tabsData[tid].secret_pass && typeof CryptoJS !== 'undefined') {
+                                        try {
+                                            const bytes = CryptoJS.AES.decrypt(content, tabsData[tid].secret_pass);
                                             const dec = bytes.toString(CryptoJS.enc.Utf8);
                                             if (!(dec === "" && bytes.sigBytes < 0)) content = dec;
                                         } catch(e) {}
@@ -1879,11 +1990,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 let content = sTab.content || '';
                                 
                                 if (!tabsData[tid]) { 
-                                    tabsData[tid] = { name: sTab.name, content: content, is_encrypted: sTab.is_encrypted || false }; 
+                                    tabsData[tid] = { name: sTab.name, content: content, is_encrypted: sTab.is_encrypted || false, is_secret: sTab.is_secret || false }; 
                                     tabsUpdated = true;
                                     if (tid === activeTabId && editor) {
-                                        editor.value = content;
-                                        editor.readOnly = isReadOnly;
+                                        editor.value = (sTab.is_secret && content.startsWith("U2FsdGVkX1")) ? "[ LOCKED TAB - Please click the tab again and enter password to view ]" : content;
+                                        editor.readOnly = isReadOnly || (sTab.is_secret && content.startsWith("U2FsdGVkX1"));
                                         updatePreview();
                                         updateHUD();
                                     }
@@ -1908,11 +2019,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         if (tid === activeTabId && !isTyping) {
                                             const isDraw = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
                                             if (isDraw) {
-                                                loadWhiteboardFromTab(content);
+                                                if (typeof wbIsDrawing !== 'undefined' && !wbIsDrawing) {
+                                                    loadWhiteboardFromTab(content);
+                                                }
                                             } else if (editor) {
                                                 let cursor = editor.selectionStart || 0;
-                                                editor.value = content;
-                                                editor.readOnly = isReadOnly;
+                                                editor.value = (tabsData[tid].is_secret && !tabsData[tid].secret_pass && content.startsWith("U2FsdGVkX1")) ? "[ LOCKED TAB - Please click the tab again and enter password to view ]" : content;
+                                                editor.readOnly = isReadOnly || (tabsData[tid].is_secret && !tabsData[tid].secret_pass);
                                                 const safePos = Math.min(cursor, content.length);
                                                 editor.setSelectionRange(safePos, safePos);
                                                 updatePreview();
@@ -2143,7 +2256,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         for (let tid in tabsData) {
             let t = document.createElement('div');
             t.className = 'tab' + (tid === activeTabId ? ' active' : ''); 
-            t.innerText = tabsData[tid].name;
+            t.innerText = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
             
             let delBtn = document.createElement('span');
             delBtn.className = 'tab-close';
@@ -2188,11 +2301,35 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
     }
 
-    function switchTab(tid, skipSave = false) {
+    async function switchTab(tid, skipSave = false) {
+        if (tabsData[tid] && tabsData[tid].is_secret && !tabsData[tid].secret_pass && tabsData[tid].content && tabsData[tid].content.startsWith("U2FsdGVkX1")) {
+            const pass = await showCustomPrompt("Unlock Tab", "This tab is a nested vault. Enter password to view:");
+            if (!pass) return; // cancel switch
+            
+            try {
+                if (typeof CryptoJS !== 'undefined') {
+                    const bytes = CryptoJS.AES.decrypt(tabsData[tid].content, pass.trim());
+                    const dec = bytes.toString(CryptoJS.enc.Utf8);
+                    if (dec || bytes.sigBytes >= 0) {
+                        tabsData[tid].content = dec;
+                        tabsData[tid].secret_pass = pass.trim();
+                        showToast("Tab unlocked!", 'success');
+                    } else {
+                        showToast("Incorrect password.", 'error');
+                        return;
+                    }
+                }
+            } catch(e) {
+                showToast("Incorrect password.", 'error');
+                return;
+            }
+        }
+
         if (activeTabId !== tid && activeTabId && tabsData[activeTabId]) {
             if (tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw')) {
                 if (whiteboardCanvas && whiteboardCanvas.width > 0 && whiteboardCanvas.height > 0 && !wbIsLoading) {
                     tabsData[activeTabId].content = whiteboardCanvas.toDataURL('image/png');
+                    saveWorkspace();
                 }
             } else if (editor) {
                 tabsData[activeTabId].content = editor.value;
@@ -2303,10 +2440,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 payload.tabs = {};
                 for (let tid in tabsData) {
                     let contentToSave = tabsData[tid].content;
+                    if (tabsData[tid].is_secret && tabsData[tid].secret_pass && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                        contentToSave = CryptoJS.AES.encrypt(contentToSave, tabsData[tid].secret_pass).toString();
+                    }
                     if (vaultPassword && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
                         contentToSave = CryptoJS.AES.encrypt(contentToSave, vaultPassword).toString();
                     }
-                    payload.tabs[tid] = { name: tabsData[tid].name, content: contentToSave };
+                    payload.tabs[tid] = { name: tabsData[tid].name, content: contentToSave, is_secret: !!tabsData[tid].is_secret };
                     lastSyncedServerTabs[tid] = { content: tabsData[tid].content };
                 }
                 lastSavedTabsJSON = currentTabsJSON;
@@ -2855,14 +2995,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
     }
 
-    if (qrBtn) {
-        qrBtn.addEventListener('click', () => {
-            if (qrCodeImg) {
-                qrCodeImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.href)}&color=00fff9&bgcolor=000000`;
-            }
-            if (qrModal) qrModal.classList.remove('hidden');
-        });
-    }
 
     if (infoBtn) infoBtn.addEventListener('click', () => infoModal && infoModal.classList.remove('hidden'));
 
@@ -2905,7 +3037,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     }
 
     // --- Universal Modal Backdrop & Escape Dismissal ---
-    const allModals = [qrModal, infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal];
+    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal];
 
     allModals.forEach(modal => {
         if (!modal) return;
@@ -2920,7 +3052,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
     });
 
-    if (closeQr) closeQr.addEventListener('click', () => qrModal && qrModal.classList.add('hidden'));
     if (closeInfo) closeInfo.addEventListener('click', () => infoModal && infoModal.classList.add('hidden'));
     if (closeShare) closeShare.addEventListener('click', () => shareModal && shareModal.classList.add('hidden'));
     if (closeProfile) closeProfile.addEventListener('click', () => profileModal && profileModal.classList.add('hidden'));
@@ -5016,7 +5147,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         { name: "Copy Document to Clipboard", shortcut: "⌘C", action: () => copyBtn && copyBtn.click() },
         { name: "Create New Workspace", shortcut: "New", action: () => newBtn && newBtn.click() },
         { name: "Create Burn Note (Self-Destruct)", shortcut: "Burn", action: () => burnBtn && burnBtn.click() },
-        { name: "💥 Burn Note Right Away", shortcut: "Burn Now", action: () => instantBurnWorkspace() }
+        { name: "💥 Burn Note Right Away", shortcut: "Burn Now", action: () => instantBurnWorkspace() },
+        { name: "Lock Current Tab (Nested Vault)", shortcut: "Lock", action: () => lockCurrentTab() }
     ];
 
     function renderCmdResults(filterText = "") {
@@ -5135,6 +5267,99 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
     }
 
+    async function lockCurrentTab() {
+        if (!activeTabId || !tabsData[activeTabId]) return;
+        if (tabsData[activeTabId].is_secret) {
+            const remove = await showCustomConfirm("Unlock Tab", "This tab is already locked. Remove the lock password?");
+            if (remove) {
+                tabsData[activeTabId].is_secret = false;
+                tabsData[activeTabId].secret_pass = null;
+                saveWorkspace();
+                renderTabs();
+                showToast("Tab lock removed.", 'success');
+            }
+            return;
+        }
+        const pass = await showCustomPrompt("Lock Tab", "Enter a secret password for this tab:");
+        if (pass && pass.trim()) {
+            tabsData[activeTabId].is_secret = true;
+            tabsData[activeTabId].secret_pass = pass.trim();
+            saveWorkspace();
+            renderTabs();
+            showToast("Tab locked successfully!", 'success');
+        }
+    }
+
+    let strokeBatch = [];
+    let strokeBatchTimeout = null;
+    let strokesUnsubscribe = null;
+
+    function broadcastStrokes() {
+        if (strokeBatch.length === 0) return;
+        const batch = [...strokeBatch];
+        strokeBatch = [];
+        if (db && currentToken) {
+            db.collection("workspaces").doc(currentToken).collection("strokes").add({
+                cid: myDeviceId,
+                tabId: activeTabId,
+                color: wbColor,
+                size: wbSize,
+                eraser: wbTool === 'eraser',
+                points: batch,
+                timestamp: Date.now()
+            });
+        }
+    }
+
+    function drawRemoteStrokeBatch(data) {
+        if (!wbCtx || !whiteboardCanvas) return;
+        
+        wbCtx.save();
+        wbCtx.lineWidth = data.size;
+        wbCtx.lineCap = 'round';
+        wbCtx.lineJoin = 'round';
+
+        if (data.eraser) {
+            wbCtx.globalCompositeOperation = 'destination-out';
+            wbCtx.strokeStyle = 'rgba(0,0,0,1)';
+            wbCtx.shadowBlur = 0;
+        } else {
+            wbCtx.globalCompositeOperation = 'source-over';
+            wbCtx.strokeStyle = data.color;
+            wbCtx.shadowColor = data.color;
+            wbCtx.shadowBlur = 6;
+        }
+
+        wbCtx.beginPath();
+        if (data.points && data.points.length > 0) {
+            wbCtx.moveTo(data.points[0].x, data.points[0].y);
+            for (let i = 1; i < data.points.length; i++) {
+                wbCtx.lineTo(data.points[i].x, data.points[i].y);
+            }
+            wbCtx.stroke();
+            wbCtx.beginPath();
+            wbCtx.moveTo(data.points[data.points.length - 1].x, data.points[data.points.length - 1].y);
+        }
+        wbCtx.restore();
+    }
+
+    function initStrokesListener() {
+        if (!db || !currentToken) return;
+        if (strokesUnsubscribe) strokesUnsubscribe();
+        
+        strokesUnsubscribe = db.collection("workspaces").doc(currentToken).collection("strokes")
+            .where("timestamp", ">", Date.now())
+            .onSnapshot(snap => {
+                snap.docChanges().forEach(change => {
+                    if (change.type === 'added') {
+                        const data = change.doc.data();
+                        if (data.cid !== myDeviceId && data.tabId === activeTabId) {
+                            drawRemoteStrokeBatch(data);
+                        }
+                    }
+                });
+            });
+    }
     // Start QuickPad Engine
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

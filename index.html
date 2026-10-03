@@ -410,6 +410,12 @@
                 <span id="hud-voice-status">Voice</span>
             </button>
 
+            <!-- Private On-Device Speech Dictation Button -->
+            <button id="hud-dictate-btn" class="hud-voice-btn" title="Private On-Device Speech Dictation">
+                <span class="voice-mic-icon">🗣️</span>
+                <span id="hud-dictate-status">Dictate</span>
+            </button>
+
             <!-- Real-Time Cursor Emoji Flare Bar -->
             <div id="flare-bar" class="flare-bar" title="Send Floating Emoji Flare to Collaborators (Ctrl+1..5)">
                 <span class="flare-btn" data-emoji="🔥">🔥</span>
@@ -542,19 +548,6 @@
             </div>
             
             <button id="save-profile-btn" class="btn primary-action btn-full" style="padding:12px; font-size:1rem; margin-top:8px;">Save Profile</button>
-        </div>
-    </div>
-
-    <!-- QR Code Modal -->
-    <div id="qr-modal" class="modal hidden">
-        <div class="modal-content modal-standard text-center">
-            <span id="close-qr" class="close-btn">&times;</span>
-            <h2 class="neon-text modal-title">Mobile Access</h2>
-            <p class="modal-subtitle">Scan with your phone camera to open this encrypted pad instantly.</p>
-            <div class="qr-wrapper">
-                <img id="qr-code-img" src="" alt="Workspace QR Code">
-            </div>
-            <p class="input-hint" style="margin-top:12px;">Zero-knowledge key is embedded in the hash link.</p>
         </div>
     </div>
 
