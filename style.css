@@ -533,12 +533,13 @@ body, html {
 /* --- Dropdown Menus --- */
 .dropdown-group {
     position: relative;
+    user-select: none;
 }
 .dropdown-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    background: rgba(13, 19, 33, 0.94);
+    position: fixed;
+    top: 0;
+    left: 0;
+    background: rgba(13, 19, 33, 0.96);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--border-highlight);
@@ -548,17 +549,24 @@ body, html {
     flex-direction: column;
     gap: 4px;
     min-width: 220px;
+    max-width: calc(100vw - 20px);
+    max-height: calc(100vh - 75px);
+    overflow-y: auto;
     opacity: 0;
     visibility: hidden;
+    pointer-events: none;
     transform: translateY(-8px) scale(0.98);
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.05);
-    z-index: 250;
+    transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.18s;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.08);
+    z-index: 500;
 }
-.dropdown-group:hover .dropdown-menu {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0) scale(1);
+.dropdown-group:hover .dropdown-menu,
+.dropdown-group.active .dropdown-menu,
+.dropdown-menu.show {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    transform: translateY(0) scale(1) !important;
 }
 
 .menu-label {

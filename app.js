@@ -1292,21 +1292,162 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
     if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', exportStandaloneEncryptedHtml);
 
-    // --- Dropdown Click Toggle Handlers ---
-    document.querySelectorAll('.dropdown-group').forEach(group => {
-        group.addEventListener('click', (e) => {
-            // Only toggle if the group itself or its direct span is clicked, not child menu buttons
-            if (e.target.closest('.dropdown-menu')) return;
-            e.stopPropagation();
-            const wasActive = group.classList.contains('active');
-            document.querySelectorAll('.dropdown-group').forEach(g => g.classList.remove('active'));
-            if (!wasActive) group.classList.add('active');
-        });
-    });
+    // --- Body-Attached Dropdown System (Fixes clipping in scrolling / mobile headers) ---
+    function initDropdownMenus() {
+        const dropdownGroups = document.querySelectorAll('.dropdown-group');
+        let activeMenu = null;
+        let activeGroup = null;
+        let closeTimeout = null;
 
-    document.addEventListener('click', () => {
-        document.querySelectorAll('.dropdown-group').forEach(g => g.classList.remove('active'));
-    });
+        function closeAllDropdowns() {
+            clearTimeout(closeTimeout);
+            document.querySelectorAll('.dropdown-menu').forEach(m => {
+                m.classList.remove('show');
+            });
+            document.querySelectorAll('.dropdown-group').forEach(g => {
+                g.classList.remove('active');
+            });
+            activeMenu = null;
+            activeGroup = null;
+        }
+
+        dropdownGroups.forEach(group => {
+            const menu = group.querySelector('.dropdown-menu');
+            if (!menu) return;
+
+            // Teleport dropdown menu to document.body so it is never clipped by #app-header or overflow
+            document.body.appendChild(menu);
+
+            function updateMenuPosition() {
+                if (!menu.classList.contains('show')) return;
+                const rect = group.getBoundingClientRect();
+
+                // If button is completely off-screen, close menu
+                if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+                    closeAllDropdowns();
+                    return;
+                }
+
+                menu.style.position = 'fixed';
+                menu.style.zIndex = '500';
+
+                const menuWidth = menu.offsetWidth || 230;
+                const menuHeight = menu.offsetHeight || 240;
+
+                // Vertical positioning: below the button
+                let top = rect.bottom + 6;
+                // Flip upward if overflowing window bottom and there is space above
+                if (top + menuHeight > window.innerHeight - 8 && rect.top - menuHeight - 6 > 0) {
+                    top = rect.top - menuHeight - 6;
+                }
+
+                // Horizontal positioning: align with right edge of button on desktop, or left edge if tight
+                let left = rect.right - menuWidth;
+                if (left + menuWidth > window.innerWidth - 10) {
+                    left = window.innerWidth - menuWidth - 10;
+                }
+                if (left < 10) {
+                    left = Math.max(10, rect.left);
+                    if (left + menuWidth > window.innerWidth - 10) {
+                        left = 10;
+                    }
+                }
+
+                menu.style.top = `${Math.round(top)}px`;
+                menu.style.left = `${Math.round(left)}px`;
+                menu.style.right = 'auto';
+                menu.style.bottom = 'auto';
+            }
+
+            function openThisDropdown() {
+                clearTimeout(closeTimeout);
+                if (activeMenu && activeMenu !== menu) {
+                    activeMenu.classList.remove('show');
+                    if (activeGroup) activeGroup.classList.remove('active');
+                }
+
+                activeMenu = menu;
+                activeGroup = group;
+                group.classList.add('active');
+                menu.classList.add('show');
+                updateMenuPosition();
+            }
+
+            function scheduleClose() {
+                clearTimeout(closeTimeout);
+                closeTimeout = setTimeout(() => {
+                    if (activeMenu === menu) {
+                        closeAllDropdowns();
+                    }
+                }, 180);
+            }
+
+            // Click Toggle (Mobile, Touch, and Desktop)
+            group.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (menu.classList.contains('show')) {
+                    closeAllDropdowns();
+                } else {
+                    openThisDropdown();
+                }
+            });
+
+            // Hover Support (Desktop Mouse)
+            group.addEventListener('mouseenter', () => {
+                if (window.matchMedia('(hover: hover)').matches) {
+                    openThisDropdown();
+                }
+            });
+            group.addEventListener('mouseleave', () => {
+                if (window.matchMedia('(hover: hover)').matches) {
+                    scheduleClose();
+                }
+            });
+
+            menu.addEventListener('mouseenter', () => {
+                clearTimeout(closeTimeout);
+            });
+            menu.addEventListener('mouseleave', () => {
+                if (window.matchMedia('(hover: hover)').matches) {
+                    scheduleClose();
+                }
+            });
+
+            // Handle clicks inside dropdown menu
+            menu.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Close menu if an action item was clicked, but NOT on inputs, sliders, or font adjustments
+                const actionBtn = e.target.closest('.menu-action-btn, .sound-fx-btn, .theme-btn');
+                if (actionBtn && !e.target.closest('input, .ss-btn, .font-size-btn, .font-btn')) {
+                    setTimeout(closeAllDropdowns, 120);
+                }
+            });
+        });
+
+        // Global dismiss handlers
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.dropdown-group, .dropdown-menu')) {
+                closeAllDropdowns();
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeAllDropdowns();
+        });
+
+        window.addEventListener('resize', closeAllDropdowns);
+
+        const appHeader = document.getElementById('app-header');
+        if (appHeader) {
+            appHeader.addEventListener('scroll', () => {
+                if (activeMenu) {
+                    closeAllDropdowns();
+                }
+            }, { passive: true });
+        }
+    }
+
+    initDropdownMenus();
 
     // --- Theme Picker Handling ---
     themeBtns.forEach(btn => {
