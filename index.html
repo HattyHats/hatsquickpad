@@ -19,7 +19,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=39">
+    <link rel="stylesheet" href="style.css?v=41">
     
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -66,15 +66,35 @@
             const splash = document.getElementById('splash-screen');
             const bg = document.getElementById('splash-bg');
             if (bg) {
-                const snippets = ["console.log('init');", "function setup() {}", "await crypto.encrypt()", "QuickPad::AES256", "{ zeroKnowledge: true }", "01001010", "localStorage.sync()", "class Workspace {}", "while(active)"];
-                for (let i = 0; i < 24; i++) {
+                const snippets = [
+                    "🔐 crypto.subtle.encrypt('AES-GCM')",
+                    "⚡ zeroKnowledge: true",
+                    "📝 # QuickPad Security Vault",
+                    "🔒 key = pbkdf2(passphrase)",
+                    "🌐 p2p.wormhole.connect()",
+                    "🎨 canvas.draw({ neonGlow: true })",
+                    "🛡️ 0 bytes sent to central server",
+                    "🍅 pomodoro.start({ focus: 25 })",
+                    "📦 workspace.exportEncryptedHtml()",
+                    "🕶️ panic.camouflage('Alt+P')",
+                    "🗣️ speech.startDictation()",
+                    "✨ sync.push({ e2ee: true })",
+                    "🔑 sha256(fingerprint)",
+                    "⚡ WebRTC.p2p.voiceChannel()"
+                ];
+                const themeColors = ['#00fff9', '#00ff66', '#38bdf8', '#818cf8'];
+                for (let i = 0; i < 15; i++) {
                     const note = document.createElement('div');
                     note.className = 'flying-note';
-                    note.innerText = snippets[Math.floor(Math.random() * snippets.length)];
-                    note.style.left = (Math.random() * 100) + '%';
-                    note.style.top = (Math.random() * 100) + '%';
-                    note.style.animationDuration = (3 + Math.random() * 4) + 's';
-                    note.style.animationDelay = (Math.random() * 3) + 's';
+                    const color = themeColors[i % themeColors.length];
+                    const snip = snippets[Math.floor(Math.random() * snippets.length)];
+                    note.innerHTML = `<span class="note-dot" style="background:${color}; color:${color};"></span><span>${snip}</span>`;
+                    note.style.borderColor = color + '44';
+                    note.style.boxShadow = `0 4px 16px rgba(0,0,0,0.45), 0 0 10px ${color}22`;
+                    note.style.left = (6 + Math.random() * 86) + '%';
+                    note.style.top = (6 + Math.random() * 86) + '%';
+                    note.style.animationDuration = (3.2 + Math.random() * 2.2) + 's';
+                    note.style.animationDelay = (-Math.random() * 4) + 's';
                     bg.appendChild(note);
                 }
             }
@@ -87,8 +107,8 @@
                     if (ed) ed.focus();
                 }, 600);
             }
-            // Auto dismiss after 1.8 seconds
-            setTimeout(dismissSplash, 1800);
+            // Auto dismiss after 2.0 seconds
+            setTimeout(dismissSplash, 2000);
             if (splash) splash.addEventListener('click', dismissSplash);
             window.addEventListener('keydown', dismissSplash, { once: true });
         })();
@@ -109,11 +129,18 @@
     <header id="app-header">
         <!-- Left Brand & Tabs -->
         <div class="header-left-section">
-            <div class="brand-badge" title="QuickPad Zero-Knowledge Workspace">
+            <div class="brand-badge" title="QuickPad Zero-Knowledge Workspace v4.0">
                 <span class="brand-icon">⚡</span>
                 <span class="brand-title">QUICKPAD</span>
+                <span class="brand-ver-tag">v4.0</span>
                 <span class="sec-dot" title="E2EE AES-256 Active"></span>
             </div>
+
+            <!-- Zero-Knowledge Privacy Inspector Shield Button -->
+            <button id="privacy-inspector-btn" class="header-icon-btn shield-btn" title="Zero-Knowledge Privacy Inspector (Verify Encryption Live)">
+                <span class="shield-icon">🛡️</span>
+                <span class="shield-badge-dot"></span>
+            </button>
 
             <!-- Tabs Bar -->
             <div id="tabs-bar">
@@ -125,15 +152,16 @@
         </div>
 
         <!-- Right Action Bar -->
+        <!-- Right Action Bar -->
         <div class="action-bar">
             <!-- Find & Replace Button -->
             <button id="find-toggle-btn" class="btn" title="Find & Replace in document (⌘F)">
-                <span>🔍 Find</span>
+                <span class="btn-icon">🔍</span><span class="btn-text">Find</span>
             </button>
 
             <!-- View Dropdown -->
             <div class="btn dropdown-group" title="View Options">
-                <span>👁️ View</span>
+                <span class="btn-icon">👁️</span><span class="btn-text">View</span>
                 <div class="dropdown-menu">
                     <button id="md-toggle-btn" class="menu-action-btn">
                         <span>👁️ Markdown Preview</span>
@@ -170,7 +198,7 @@
 
             <!-- Editor & Typography Dropdown -->
             <div class="btn dropdown-group" title="Editor & Typography">
-                <span>⚙️ Format</span>
+                <span class="btn-icon">⚙️</span><span class="btn-text">Format</span>
                 <div class="dropdown-menu">
                     <div class="menu-label">Typography</div>
                     <div class="menu-row font-selector">
@@ -193,7 +221,7 @@
 
             <!-- File Actions Dropdown -->
             <div class="btn dropdown-group" title="File Actions">
-                <span>📁 File</span>
+                <span class="btn-icon">📁</span><span class="btn-text">File</span>
                 <div class="dropdown-menu">
                     <button id="export-md-btn" class="menu-action-btn">
                         <span>📥 Download Markdown (.md)</span>
@@ -206,6 +234,9 @@
                     </button>
                     <button id="export-html-btn" class="menu-action-btn" style="color:var(--primary-color);">
                         <span>🔐 Export Encrypted HTML (.html)</span>
+                    </button>
+                    <button id="export-card-btn" class="menu-action-btn" style="color:#ffb000;">
+                        <span>🎨 Export Note as Image Card (.png)</span>
                     </button>
                     <div class="menu-divider"></div>
                     <button id="steg-open-btn" class="menu-action-btn" style="color:#00fff9;">
@@ -227,17 +258,17 @@
             
             <!-- Quick Copy -->
             <button id="copy-btn" class="btn" title="Copy note text to clipboard (⌘C)">
-                <span>📋 Copy</span>
+                <span class="btn-icon">📋</span><span class="btn-text">Copy</span>
             </button>
 
             <!-- Direct Share Button -->
             <button id="share-btn" class="btn primary-action share-btn" title="Share Workspace Links & QR">
-                <span>🔗 Share</span>
+                <span class="btn-icon">🔗</span><span class="btn-text">Share</span>
             </button>
 
             <!-- Security Dropdown -->
             <div class="btn dropdown-group burn" title="Security & Burn">
-                <span>🔥 Security</span>
+                <span class="btn-icon">🔥</span><span class="btn-text">Security</span>
                 <div class="dropdown-menu">
                     <button id="instant-burn-btn" class="menu-action-btn burn" style="color:#ff0055;font-weight:600;">💥 Burn Note Right Away</button>
                     <div class="menu-divider"></div>
@@ -251,7 +282,7 @@
 
             <!-- Settings Dropdown -->
             <div class="btn dropdown-group" title="Settings & Themes">
-                <span>🎨 Settings</span>
+                <span class="btn-icon">🎨</span><span class="btn-text">Settings</span>
                 <div id="settings-menu" class="dropdown-menu">
                     <div class="menu-label">Theme Accents</div>
                     <div class="menu-row theme-picker-row">
@@ -297,7 +328,7 @@
             </div>
 
             <button id="new-btn" class="btn btn-new-pad" title="Create New Workspace">
-                <span>✨ New</span>
+                <span class="btn-icon">✨</span><span class="btn-text">New</span>
             </button>
         </div>
     </header>
@@ -325,6 +356,20 @@
     <main id="workspace-main">
         <div id="focus-line-indicator" class="focus-line-indicator"></div>
         <textarea id="editor" placeholder="Start typing... Everything auto-saves with zero-knowledge AES-256 encryption. (Type / for commands, paste images, or create .draw for whiteboard)" autofocus></textarea>
+        
+        <!-- Floating Medium/Notion-Style Text Formatting Toolbar -->
+        <div id="floating-format-bar" class="floating-format-bar hidden">
+            <button class="fmt-btn" data-format="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+            <button class="fmt-btn" data-format="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+            <button class="fmt-btn" data-format="strike" title="Strikethrough"><s>S</s></button>
+            <div class="fmt-divider"></div>
+            <button class="fmt-btn" data-format="h1" title="Heading 1"><b>H1</b></button>
+            <button class="fmt-btn" data-format="h2" title="Heading 2"><b>H2</b></button>
+            <button class="fmt-btn" data-format="code" title="Inline Code"><code>&lt;&gt;</code></button>
+            <button class="fmt-btn" data-format="link" title="Insert Link">🔗</button>
+            <button class="fmt-btn" data-format="task" title="Checklist Item">☑️</button>
+            <button class="fmt-btn" data-format="quote" title="Blockquote">”</button>
+        </div>
         <div id="preview" class="markdown-body hidden"></div>
         <div id="editor-mirror"></div>
         <div id="cursors-container"></div>
@@ -388,10 +433,7 @@
             <button id="profile-pill-btn" class="hud-profile-pill" title="Click to customize your profile name and avatar">
                 <span id="profile-avatar-display" class="profile-avatar-circle">👤</span>
                 <span id="profile-name-display" class="profile-name-text">Anon (You)</span>
-                <span class="profile-edit-badge">✏️</span>
             </button>
-
-            <div class="hud-divider"></div>
 
             <!-- Active Collaborators Stack -->
             <div id="live-peers-container" class="live-peers-container">
@@ -407,44 +449,64 @@
             <!-- WebRTC P2P Voice Walkie-Talkie Button -->
             <button id="hud-voice-btn" class="hud-voice-btn" title="WebRTC Encrypted P2P Voice (Click to toggle mic, Hold space to talk)">
                 <span class="voice-mic-icon">🎙️</span>
-                <span id="hud-voice-status">Voice</span>
+                <span id="hud-voice-status" class="hud-btn-text">Voice</span>
             </button>
 
-            <!-- Private On-Device Speech Dictation Button -->
-            <button id="hud-dictate-btn" class="hud-voice-btn" title="Private On-Device Speech Dictation">
-                <span class="voice-mic-icon">🗣️</span>
-                <span id="hud-dictate-status">Dictate</span>
-            </button>
-
-            <!-- Real-Time Cursor Emoji Flare Bar -->
-            <div id="flare-bar" class="flare-bar" title="Send Floating Emoji Flare to Collaborators (Ctrl+1..5)">
-                <span class="flare-btn" data-emoji="🔥">🔥</span>
-                <span class="flare-btn" data-emoji="💡">💡</span>
-                <span class="flare-btn" data-emoji="🚀">🚀</span>
-                <span class="flare-btn" data-emoji="🔒">🔒</span>
-                <span class="flare-btn" data-emoji="👏">👏</span>
+            <!-- Live Tools Dropup Menu -->
+            <div class="dropdown-group hud-tools-group" title="Live Collaboration & Developer Tools">
+                <button id="hud-tools-btn" class="hud-tool-menu-btn" title="Live Collaboration & Developer Tools">
+                    <span class="btn-icon">⚡</span>
+                    <span class="hud-btn-text">Tools</span>
+                    <span class="hud-caret">▾</span>
+                </button>
+                <div id="hud-tools-menu" class="dropdown-menu hud-dropup-menu">
+                    <div class="menu-label">Collaboration &amp; Coding</div>
+                    <button id="hud-dictate-btn" class="menu-action-btn">
+                        <span>🗣️ Speech Dictation</span>
+                        <span id="hud-dictate-status" class="hud-tool-badge">Dictate</span>
+                    </button>
+                    <button id="hud-laser-btn" class="menu-action-btn">
+                        <span>🔦 Laser Pointer</span>
+                        <kbd>Alt+L</kbd>
+                    </button>
+                    <button id="hud-runner-btn" class="menu-action-btn" style="color:var(--primary-color);">
+                        <span>▶️ Live Code Runner</span>
+                        <kbd>⌘Enter</kbd>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <div class="menu-label">Cursor Reaction Flares</div>
+                    <div id="flare-bar" class="flare-bar hud-menu-flares" title="Send Floating Emoji Flare (Ctrl+1..5)">
+                        <span class="flare-btn" data-emoji="🔥" title="Fire">🔥</span>
+                        <span class="flare-btn" data-emoji="💡" title="Idea">💡</span>
+                        <span class="flare-btn" data-emoji="🚀" title="Rocket">🚀</span>
+                        <span class="flare-btn" data-emoji="🔒" title="Secure">🔒</span>
+                        <span class="flare-btn" data-emoji="👏" title="Applause">👏</span>
+                    </div>
+                </div>
             </div>
-
-            <div class="hud-divider"></div>
-
-            <!-- Collaborator Laser Pointer Toggle -->
-            <button id="hud-laser-btn" class="hud-tool-btn" title="Toggle Real-Time Collaborator Laser Pointer (Alt+L)">
-                <span>🔦 Laser</span>
-            </button>
-
-            <!-- Live Code Runner Toggle -->
-            <button id="hud-runner-btn" class="hud-tool-btn" title="Live Sandboxed Code Runner (⌘Enter)">
-                <span>▶️ Run</span>
-            </button>
         </div>
 
         <div class="hud-right-section">
+            <!-- Explicit Auto-Save & Cryptographic Sync Status Indicator -->
+            <div id="hud-save-status" class="hud-save-status saved" title="Auto-Save & Cryptographic Sync Status">
+                <span class="save-status-dot"></span>
+                <span id="hud-save-text">Saved</span>
+            </div>
+
+            <!-- Pomodoro Focus Timer Widget -->
+            <div id="hud-pomodoro-container" class="hud-pomodoro-pill" title="Pomodoro Focus Timer (Click to set duration • ▶ to start)">
+                <span id="hud-pomodoro-icon">🍅</span>
+                <span id="hud-pomodoro-time">25:00</span>
+                <button id="hud-pomodoro-btn" class="pomodoro-ctrl-btn" title="Start / Pause Pomodoro">▶</button>
+                <button id="hud-pomodoro-reset" class="pomodoro-ctrl-btn" title="Reset Pomodoro">↺</button>
+            </div>
+
             <div id="hud-timer-badge" class="hud-timer-badge hidden" title="Workspace Self-Destruct Countdown">
                 ⏳ <span id="hud-timer-val">00:00</span>
             </div>
             
-            <!-- Real-Time WPM Typing Momentum Gauge -->
-            <div class="hud-stat" id="hud-wpm-container" title="Real-Time Typing Speed">
+            <!-- Real-Time WPM Typing Momentum Gauge (Hidden when idle) -->
+            <div class="hud-stat hidden" id="hud-wpm-container" title="Real-Time Typing Speed">
                 ⚡ <span id="hud-wpm">0</span> WPM
             </div>
 
@@ -453,10 +515,11 @@
                 <span id="hud-tasks">0/0</span>
             </div>
 
-            <div id="hud-security-pill" class="hud-sec-pill">🔒 AES-256 E2EE</div>
-            <div class="hud-stat"><span id="hud-chars">0</span> chars</div>
-            <div class="hud-stat"><span id="hud-words">0</span> words</div>
-            <div class="hud-stat"><span id="hud-read">0</span> min read</div>
+            <!-- Document Statistics -->
+            <div class="hud-stat" id="hud-reading-stat" title="Word count, character count, and reading time">
+                <span id="hud-words">0</span> words • <span id="hud-read">1</span>m read
+                <span id="hud-chars-stat" class="hud-chars-inline">(<span id="hud-chars">0</span> chars)</span>
+            </div>
         </div>
     </div>
 
@@ -556,31 +619,37 @@
         <div class="modal-content modal-standard info-modal-content">
             <span id="close-info" class="close-btn">&times;</span>
             <div class="text-center" style="margin-bottom: 20px;">
-                <div class="splash-badge" style="display:inline-block;margin-bottom:8px;">VERSION 2.5 NEXT-GEN</div>
+                <div class="splash-badge" style="display:inline-block;margin-bottom:8px;">VERSION 4.0 PRO</div>
                 <h2 class="neon-text" style="font-size: 1.8rem; margin-bottom: 4px;">Quick-Pad</h2>
-                <p style="color: var(--primary-color); font-family: monospace; font-size: 0.85rem;">Zero-Knowledge Real-Time Scratchpad • Created by HattyHats</p>
+                <p style="color: var(--primary-color); font-family: monospace; font-size: 0.85rem;">Zero-Knowledge Real-Time Scratchpad • v4.0 Pro</p>
             </div>
             
             <p class="info-intro">QuickPad is a hyper-fast, serverless scratchpad that syncs instantly across your devices. Engineered for pure speed and absolute privacy: <strong>no accounts, no trackers, and no server-side plaintext storage</strong>. Open the link, type, and share.</p>
             
-            <div class="feature-section-title">✨ Key Features & Capabilities</div>
+            <div class="feature-section-title">✨ Key Features &amp; Capabilities</div>
             <ul class="feature-list">
                 <li>🔒 <strong>Zero-Knowledge Architecture:</strong> AES-256 encryption keys are generated locally and stored exclusively in the URL hash (`#`). They never touch the server.</li>
+                <li>🛡️ <strong>Zero-Knowledge Privacy Inspector:</strong> Live, split-screen cryptographic audit verifying real-time ciphertext, derivation salt, and zero-byte server leakage.</li>
+                <li>✍️ <strong>Floating Format Mini-Bar:</strong> Highlight any text to instantly format bold, italic, headings, checklists, links, and code without remembering Markdown syntax.</li>
+                <li>🍅 <strong>Pomodoro Focus Timer:</strong> Built-in 25/5 deep work cycles in the HUD with procedural synthesized acoustic chime bells.</li>
+                <li>🎨 <strong>Social Note Card Exporter:</strong> Turn any note or code snippet into a beautiful, high-res social image card with custom cyberpunk gradients.</li>
+                <li>🔒 <strong>Nested Secret Tabs (Vault-in-a-Vault):</strong> Lock individual tabs behind a secondary passphrase for multi-tenant privacy.</li>
+                <li>🗣️ <strong>On-Device Voice Dictation:</strong> Stream speech to text locally into notes with zero third-party audio transmission.</li>
+                <li>🖌️ <strong>Live Collaborative Whiteboard:</strong> Real-time 250ms vector stroke streaming across `.draw` tabs with infinite pens, highlighters, and erasers.</li>
                 <li>⚡ <strong>Real-Time Live Collaboration:</strong> Peer keystrokes, remote cursor positions, collaborator avatars, and live typing indicators update with ultra-low latency.</li>
                 <li>🎙️ <strong>Encrypted P2P Voice Walkie-Talkie:</strong> Push-to-talk WebRTC audio channel directly between active collaborators with audio visualizer ring.</li>
                 <li>🎉 <strong>Live Cursor Emoji Flares:</strong> Send floating reaction particles (`🔥 💡 🚀 🔒 👏` or `Ctrl+1..5`) rising straight from your collaborator cursor in real time.</li>
-                <li>🎨 <strong>Encrypted Neon Whiteboard:</strong> Create `.draw` tabs to sketch diagrams, wireframes, and handwritten notes on an encrypted HTML5 canvas with neon colors and pen/highlighter/eraser tools.</li>
                 <li>🔊 <strong>Synthesized Mechanical Switch Audio:</strong> Pure Web Audio API procedural sound engine with Thock, Click, IBM Model M, and Cyber sound profiles.</li>
-                <li>⚡ <strong>Cipher Glitch & WPM Streak:</strong> Hollywood-style matrix decryption effect on note load, plus real-time typing speed gauge with blazing cyan fire mode at 80+ WPM.</li>
-                <li>🕶️ <strong>Stealth Camouflage & Duress Decoy:</strong> Instant Panic Boss Key (`Alt+P` or double-tap `Esc`) swaps to a realistic office document. Duress PIN unlocks a benign decoy vault under coercion.</li>
-                <li>🖼️ <strong>Zero-Knowledge Image Paste & Drop:</strong> Paste screenshots or drag images directly into notes; automatically optimized and encrypted with AES-256.</li>
+                <li>⚡ <strong>Cipher Glitch &amp; WPM Streak:</strong> Hollywood-style matrix decryption effect on note load, plus real-time typing speed gauge with blazing cyan fire mode at 80+ WPM.</li>
+                <li>🕶️ <strong>Stealth Camouflage &amp; Duress Decoy:</strong> Instant Panic Boss Key (`Alt+P` or double-tap `Esc`) swaps to a realistic office document. Duress PIN unlocks a benign decoy vault under coercion.</li>
+                <li>🖼️ <strong>Zero-Knowledge Image Paste &amp; Drop:</strong> Paste screenshots or drag images directly into notes; automatically optimized and encrypted with AES-256.</li>
                 <li>🔐 <strong>Self-Decrypting HTML Exporter:</strong> Export notes as standalone zero-dependency encrypted `.html` files that decrypt locally in any browser with your passphrase.</li>
                 <li>☑️ <strong>Interactive Task Progress:</strong> Live HUD counter detects markdown `- [ ]` checkboxes and displays real-time completion percentages.</li>
-                <li>🔍 <strong>Find & Replace (`⌘F` / `Ctrl+F`):</strong> Fast in-document search with match navigation and single/bulk replace.</li>
+                <li>🔍 <strong>Find &amp; Replace (`⌘F` / `Ctrl+F`):</strong> Fast in-document search with match navigation and single/bulk replace.</li>
                 <li>⌨️ <strong>Command Palette (`⌘K` / `Ctrl+K`):</strong> Instant access to all actions, commands, and tab switching via keyboard.</li>
-                <li>📁 <strong>Import & Export:</strong> Export your notes as `.md`, `.txt`, `.html`, or `.json` workspace backups.</li>
+                <li>📁 <strong>Import &amp; Export:</strong> Export your notes as `.md`, `.txt`, `.html`, or `.json` workspace backups.</li>
                 <li>💬 <strong>Secure Peer DMs:</strong> RSA-OAEP 2048-bit encrypted direct messaging. Click any collaborator in the presence bar to chat privately.</li>
-                <li>🔥 <strong>Self-Destruct & Burn Notes:</strong> Set timed auto-destruct workspaces or one-time burn links that wipe from the database the moment they are opened.</li>
+                <li>🔥 <strong>Self-Destruct &amp; Burn Notes:</strong> Set timed auto-destruct workspaces or one-time burn links that wipe from the database the moment they are opened.</li>
             </ul>
             
             <div class="feature-section-title sec-header">🛡️ Cryptographic Security Architecture</div>
@@ -588,6 +657,122 @@
             
             <div class="info-footer">
                 Information should be free. Build things that empower people.
+            </div>
+        </div>
+    </div>
+
+    <!-- Zero-Knowledge & Privacy Inspector Modal -->
+    <div id="privacy-inspector-modal" class="modal hidden">
+        <div class="modal-content privacy-inspector-content">
+            <span id="close-privacy-inspector" class="close-btn">&times;</span>
+            
+            <div class="inspector-header text-center">
+                <div class="splash-badge inspector-badge">
+                    <span class="live-pulse-dot"></span> ZERO-KNOWLEDGE CRYPTOGRAPHIC AUDIT
+                </div>
+                <h2 class="neon-text inspector-title">Zero-Knowledge &amp; Privacy Inspector</h2>
+                <p class="modal-subtitle">Live, on-device cryptographic verification. Prove mathematically that your plaintext never touches the wire.</p>
+            </div>
+
+            <!-- Top Metric Badges -->
+            <div class="inspector-metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Central Server Plaintext Sent</div>
+                    <div class="metric-value highlight-green">0 Bytes (Zero-Knowledge)</div>
+                    <div class="metric-sub">RFC 3986 Isolation Active</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Client Encryption Cipher</div>
+                    <div class="metric-value highlight-cyan">AES-256 (CBC)</div>
+                    <div class="metric-sub">OpenSSL / Web Crypto Spec</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Decryption Key Location</div>
+                    <div class="metric-value highlight-amber">URL Hash (`#`) Fragment</div>
+                    <div class="metric-sub">Physically Never Leaves Browser</div>
+                </div>
+            </div>
+
+            <!-- Live Split-Screen Inspector -->
+            <div class="inspector-split-container">
+                <div class="inspector-panel">
+                    <div class="inspector-panel-header">
+                        <span class="panel-tag tag-plain">1. WHAT YOU SEE (LOCAL RAM ONLY)</span>
+                        <span id="inspector-plain-length" class="panel-stat">0 chars</span>
+                    </div>
+                    <div class="inspector-terminal">
+                        <pre id="inspector-plaintext-view" class="inspector-code">Loading active note content...</pre>
+                    </div>
+                    <div class="panel-footer-note">
+                        <span class="check-icon">✓</span> Decrypted in local device browser memory only.
+                    </div>
+                </div>
+
+                <div class="inspector-panel">
+                    <div class="inspector-panel-header">
+                        <span class="panel-tag tag-cipher">2. WHAT LEAVES YOUR DEVICE (CIPHERTEXT)</span>
+                        <span id="inspector-cipher-length" class="panel-stat">0 bytes</span>
+                    </div>
+                    <div class="inspector-terminal cipher-terminal">
+                        <pre id="inspector-ciphertext-view" class="inspector-code">Generating live AES ciphertext...</pre>
+                    </div>
+                    <div class="panel-footer-note">
+                        <span class="check-icon">🔒</span> Scrambled client-side before touching storage or network.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cryptographic Parameter Breakdown Grid -->
+            <div class="inspector-params-box">
+                <div class="param-row">
+                    <span class="param-name">OpenSSL Header &amp; Magic:</span>
+                    <span class="param-val code-font">U2FsdGVkX1 ("Salted__" header)</span>
+                </div>
+                <div class="param-row">
+                    <span class="param-name">Random 64-Bit Salt (Hex):</span>
+                    <span id="inspector-salt-hex" class="param-val code-font">Extracting salt...</span>
+                </div>
+                <div class="param-row">
+                    <span class="param-name">Raw Ciphertext Sample (Hex):</span>
+                    <span id="inspector-cipher-hex" class="param-val code-font">Calculating...</span>
+                </div>
+                <div class="param-row">
+                    <span class="param-name">Key Transport Security:</span>
+                    <span class="param-val">Decryption key stays behind browser hash fragment (`#`). Never sent in HTTP/WS packets.</span>
+                </div>
+            </div>
+
+            <!-- Plain-English 3-Step Architecture Breakdown -->
+            <div class="feature-section-title sec-header" style="margin-top:22px;">🛡️ How QuickPad Proves Absolute Privacy</div>
+            <div class="inspector-steps-list">
+                <div class="step-card">
+                    <div class="step-num">1</div>
+                    <div class="step-body">
+                        <strong>Key Generation on Device:</strong> Your unique AES-256 decryption key is generated locally and stored exclusively in the URL hash (after <code>#</code>). Under internet standard <strong>RFC 3986 §3.5</strong>, web browsers physically refuse to transmit hash fragments to any web server or network relay.
+                    </div>
+                </div>
+                <div class="step-card">
+                    <div class="step-num">2</div>
+                    <div class="step-body">
+                        <strong>In-Memory Client-Side Encryption:</strong> Every keystroke, drawing, and file is encrypted directly inside your browser's RAM using standard AES-256 with an independently randomized cryptographic salt before touching storage or WebSockets.
+                    </div>
+                </div>
+                <div class="step-card">
+                    <div class="step-num">3</div>
+                    <div class="step-body">
+                        <strong>Zero-Knowledge Guarantee:</strong> Central database servers and sync relays only ever receive and store the scrambled ciphertext string shown above. Even the database administrator, server host, or a compromised network relay cannot read your plaintext.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons Footer -->
+            <div class="inspector-footer">
+                <button id="copy-inspection-log-btn" class="btn primary-action">
+                    <span>📋 Copy Cryptographic Audit Log</span>
+                </button>
+                <div class="inspector-devtools-hint">
+                    💡 <strong>Live DevTools Proof:</strong> Press <kbd>F12</kbd> &gt; <strong>Network</strong> &gt; <strong>WS</strong>. Inspect any message packet while typing—you will only ever see client-side ciphertext.
+                </div>
             </div>
         </div>
     </div>
@@ -620,12 +805,74 @@
                 </div>
             </div>
 
+            <!-- Optional Password Protection for Read-Only Link -->
+            <div class="form-group readonly-pass-box" style="margin-top:12px; padding:10px 12px; background:rgba(0,255,249,0.04); border:1px solid rgba(0,255,249,0.15); border-radius:6px;">
+                <label class="readonly-pass-toggle-label" style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; margin-bottom:0; font-size:0.85rem; color:#00fff9;">
+                    <span>🔐 Require Passcode to View</span>
+                    <input type="checkbox" id="share-pass-checkbox" style="cursor:pointer; accent-color:var(--primary-color);">
+                </label>
+                <div id="share-pass-container" class="hidden" style="margin-top:10px;">
+                    <div class="copy-input-row">
+                        <input type="text" id="share-pass-input" placeholder="Enter custom passcode..." class="share-url-input" style="font-family:monospace; letter-spacing:1px;">
+                        <button id="share-pass-gen-btn" class="btn" title="Generate random passcode">🎲 Gen</button>
+                    </div>
+                    <span class="input-hint" style="margin-top:5px; display:block; font-size:0.75rem; color:#8e9aaf;">Decryption key is protected with this passcode. Readers must enter the passcode to decrypt and view.</span>
+                </div>
+            </div>
+
             <div class="share-qr-section">
                 <div class="menu-label" style="margin-bottom: 8px;">Mobile QR Code</div>
                 <div class="qr-wrapper-mini">
                     <img id="share-qr-img" src="" alt="Workspace QR Code" class="share-qr-img">
                 </div>
                 <span class="input-hint">Scan with any phone camera to open on mobile.</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Beautiful Note PNG / Code Card Export Modal -->
+    <div id="card-export-modal" class="modal hidden">
+        <div class="modal-content modal-card-export">
+            <span id="close-card-modal" class="close-btn">&times;</span>
+            <h2 class="neon-text modal-title">🎨 Export Note as Beautiful Card</h2>
+            <p class="modal-subtitle">Generate a stylized, shareable high-resolution image card for Twitter/X, Discord, or documentation.</p>
+
+            <!-- Card Controls -->
+            <div class="card-controls-bar">
+                <div class="card-ctrl-group">
+                    <label>Gradient Theme:</label>
+                    <div class="card-theme-buttons">
+                        <button class="card-theme-btn active" data-card-theme="cyber" title="Cyber Cyan">Cyber</button>
+                        <button class="card-theme-btn" data-card-theme="matrix" title="Matrix Neon">Matrix</button>
+                        <button class="card-theme-btn" data-card-theme="sunset" title="Sunset Crimson">Sunset</button>
+                        <button class="card-theme-btn" data-card-theme="purple" title="Neon Nebula">Nebula</button>
+                        <button class="card-theme-btn" data-card-theme="midnight" title="Midnight Slate">Midnight</button>
+                    </div>
+                </div>
+                <div class="card-ctrl-group">
+                    <label>Font Size:</label>
+                    <select id="card-font-size-select" class="card-select">
+                        <option value="16">Compact (16px)</option>
+                        <option value="20" selected>Standard (20px)</option>
+                        <option value="24">Large (24px)</option>
+                    </select>
+                </div>
+                <div class="card-ctrl-group">
+                    <label class="card-checkbox-label">
+                        <input type="checkbox" id="card-watermark-check" checked> QuickPad Branding
+                    </label>
+                </div>
+            </div>
+
+            <!-- Card Preview Canvas -->
+            <div class="card-preview-wrapper">
+                <canvas id="card-render-canvas" class="card-render-canvas"></canvas>
+            </div>
+
+            <!-- Export Actions -->
+            <div class="card-modal-actions">
+                <button id="card-copy-img-btn" class="btn" title="Copy Card Image to Clipboard">📋 Copy Image</button>
+                <button id="card-download-png-btn" class="btn primary-action" title="Download High-Res PNG">📥 Download PNG</button>
             </div>
         </div>
     </div>
@@ -848,7 +1095,7 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=39"></script>
+    <script src="app.js?v=41"></script>
     <script>
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             window.addEventListener('load', () => {
