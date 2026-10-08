@@ -79,16 +79,6 @@
     const customDialogModal = document.getElementById('custom-dialog-modal');
     const collaboratorsModal = document.getElementById('collaborators-modal');
     const collaboratorsList = document.getElementById('collaborators-list');
-    const privacyInspectorModal = document.getElementById('privacy-inspector-modal');
-    const privacyInspectorBtn = document.getElementById('privacy-inspector-btn');
-    const closePrivacyInspector = document.getElementById('close-privacy-inspector');
-    const copyInspectionLogBtn = document.getElementById('copy-inspection-log-btn');
-    const inspectorPlaintextView = document.getElementById('inspector-plaintext-view');
-    const inspectorCiphertextView = document.getElementById('inspector-ciphertext-view');
-    const inspectorPlainLength = document.getElementById('inspector-plain-length');
-    const inspectorCipherLength = document.getElementById('inspector-cipher-length');
-    const inspectorSaltHex = document.getElementById('inspector-salt-hex');
-    const inspectorCipherHex = document.getElementById('inspector-cipher-hex');
 
     // --- Modal Close Buttons ---
     const closeInfo = document.getElementById('close-info');
@@ -97,14 +87,13 @@
     const closeMerge = document.getElementById('close-merge');
     const closeCustomDialog = document.getElementById('close-custom-dialog');
     const closeCollaborators = document.getElementById('close-collaborators');
-    const cardExportModal = document.getElementById('card-export-modal');
-    const closeCardModal = document.getElementById('close-card-modal');
 
     // --- Share Modal Inputs ---
     const shareEditLink = document.getElementById('share-edit-link');
     const shareViewLink = document.getElementById('share-view-link');
     const copyEditLink = document.getElementById('copy-edit-link');
     const copyViewLink = document.getElementById('copy-view-link');
+    const qrCodeImg = document.getElementById('qr-code-img');
     const shareQrImg = document.getElementById('share-qr-img');
 
     // --- Merge Modal Elements ---
@@ -360,28 +349,6 @@
     // User Profile
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
-
-    // v4.0 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.0 Pro
-
-Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
-Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
-
-### 🚀 Getting Started Checklist
-- [x] Create a private workspace (You're here!)
-- [ ] Try formatting text with the floating toolbar (Highlight any text)
-- [ ] Start a Pomodoro focus sprint with the 🍅 timer in the HUD
-- [ ] Export a beautiful image card from File -> Export Note as Image Card
-- [ ] Inspect your encryption live with the 🛡️ Shield button in the header
-- [ ] Share your note or create a password-protected link via 🔗 Share
-
-### 💡 Pro Tips & Shortcuts
-- **⚡ Command Palette:** Press \`Cmd+K\` (or \`Ctrl+K\`) for instant actions.
-- **🎨 Markdown Preview:** Press \`Alt+M\` (or \`Alt+S\` for Split View).
-- **🎨 Whiteboard:** Add a new tab ending in \`.draw\` (e.g. \`sketch.draw\`) for real-time drawing.
-- **🔒 Secret Vault:** Right-click or lock any tab with a passphrase for nested privacy.
-- **🕶️ Panic Camouflage:** Press \`Alt+P\` or double-tap \`Esc\` to instantly disguise your screen.
-`;
 
     // Custom Background & Theme Restore
     let customBgColor = localStorage.getItem('quickpad_bg');
@@ -680,10 +647,6 @@ Everything you type is encrypted directly in your browser with AES-256 before le
         const wpm = Math.round(keystrokeHistory.length * 2.4);
         currentWpm = wpm;
         if (hudWpm) hudWpm.innerText = wpm;
-        if (hudWpmContainer) {
-            if (wpm > 0) hudWpmContainer.classList.remove('hidden');
-            else hudWpmContainer.classList.add('hidden');
-        }
         if (editor) {
             if (wpm >= 60) editor.classList.add('wpm-blazing');
             else editor.classList.remove('wpm-blazing');
@@ -696,10 +659,6 @@ Everything you type is encrypted directly in your browser with AES-256 before le
         const wpm = Math.round(keystrokeHistory.length * 2.4);
         currentWpm = wpm;
         if (hudWpm) hudWpm.innerText = wpm;
-        if (hudWpmContainer) {
-            if (wpm > 0) hudWpmContainer.classList.remove('hidden');
-            else hudWpmContainer.classList.add('hidden');
-        }
         if (editor && wpm < 60) editor.classList.remove('wpm-blazing');
     }, 1000);
 
@@ -1370,32 +1329,28 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 }
 
                 menu.style.position = 'fixed';
-                menu.style.zIndex = '2500';
+                menu.style.zIndex = '500';
 
                 const menuWidth = menu.offsetWidth || 230;
                 const menuHeight = menu.offsetHeight || 240;
 
-                // Vertical positioning:
+                // Vertical positioning: below the button
                 let top = rect.bottom + 6;
-                // If button is in bottom half of viewport (like bottom HUD) or overflowing bottom
-                if (rect.top > window.innerHeight / 2 || top + menuHeight > window.innerHeight - 8) {
-                    if (rect.top - menuHeight - 6 > 0) {
-                        top = rect.top - menuHeight - 6;
-                    }
+                // Flip upward if overflowing window bottom and there is space above
+                if (top + menuHeight > window.innerHeight - 8 && rect.top - menuHeight - 6 > 0) {
+                    top = rect.top - menuHeight - 6;
                 }
 
-                // Horizontal positioning: align left for left-side buttons, right for right-side buttons
-                let left;
-                if (rect.left + menuWidth <= window.innerWidth - 10) {
-                    left = rect.left;
-                } else {
-                    left = rect.right - menuWidth;
-                }
+                // Horizontal positioning: align with right edge of button on desktop, or left edge if tight
+                let left = rect.right - menuWidth;
                 if (left + menuWidth > window.innerWidth - 10) {
                     left = window.innerWidth - menuWidth - 10;
                 }
                 if (left < 10) {
-                    left = 10;
+                    left = Math.max(10, rect.left);
+                    if (left + menuWidth > window.innerWidth - 10) {
+                        left = 10;
+                    }
                 }
 
                 menu.style.top = `${Math.round(top)}px`;
@@ -1961,33 +1916,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 window.history.replaceState({}, '', `#${rawToken}`);
             }
 
-            const isProtectedReadOnly = viewParam && (urlParams.get('protected') === '1' || urlParams.get('pin') === '1');
-            if (isProtectedReadOnly && rawToken.includes('_')) {
-                let parts = rawToken.split('_');
-                currentToken = parts[0];
-                const encKey = parts.slice(1).join('_');
-                let unlocked = false;
-                while (!unlocked) {
-                    const enteredPass = await showCustomPrompt("🔐 Protected Read-Only Note", "This document is password protected. Enter passcode to decrypt:");
-                    if (!enteredPass) {
-                        showToast("Passcode required to view note.", "error");
-                        break;
-                    }
-                    try {
-                        const dec = CryptoJS.AES.decrypt(decodeURIComponent(encKey), enteredPass.trim()).toString(CryptoJS.enc.Utf8);
-                        if (dec && dec.length > 0) {
-                            urlKey = dec;
-                            vaultPassword = dec;
-                            unlocked = true;
-                            showToast("Decrypted successfully!", "success");
-                        } else {
-                            showToast("Incorrect passcode. Try again.", "error");
-                        }
-                    } catch(err) {
-                        showToast("Incorrect passcode. Try again.", "error");
-                    }
-                }
-            } else if (rawToken.includes('_')) {
+            if (rawToken.includes('_')) {
                 let parts = rawToken.split('_');
                 currentToken = parts[0];
                 urlKey = parts.slice(1).join('_');
@@ -1995,12 +1924,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             } else {
                 currentToken = rawToken;
                 urlKey = null;
-            }
-
-            // Seed friendly welcome template if fresh workspace
-            if (!viewParam && !padParam && !window.location.hash && tabsData['main'] && !tabsData['main'].content) {
-                tabsData['main'].content = WELCOME_CHECKLIST_TEMPLATE;
-                if (editor) editor.value = WELCOME_CHECKLIST_TEMPLATE;
             }
 
             await initCrypto();
@@ -2018,12 +1941,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         initTypewriterAndFocus();
         initSlashCommands();
         initHorizontalScrollbars();
-
-        // Initialize v4.0 Pro Enhancements
-        initFloatingFormatBar();
-        initPomodoroTimer();
-        initCardExporter();
-        initSharePassProtection();
     }
 
     function initHorizontalScrollbars() {
@@ -2439,12 +2356,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             }
                         }
                     } else {
-                        if (tabsData['main'] && !tabsData['main'].content && !isReadOnly && !isBurnMode) {
-                            tabsData['main'].content = WELCOME_CHECKLIST_TEMPLATE;
-                            if (editor && activeTabId === 'main') editor.value = WELCOME_CHECKLIST_TEMPLATE;
-                            updateHUD();
-                            updatePreview();
-                        }
                         saveWorkspace();
                     }
                 } catch (err) {
@@ -2511,43 +2422,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 }
             };
 
-            t.ondblclick = (e) => {
-                e.stopPropagation();
-                if (t.querySelector('.tab-rename-input')) return;
-                const oldName = tabsData[tid].name;
-                t.innerHTML = '';
-                const input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'tab-rename-input';
-                input.value = oldName;
-                t.appendChild(input);
-                input.focus();
-                input.select();
-
-                let committed = false;
-                const commit = () => {
-                    if (committed) return;
-                    committed = true;
-                    const val = input.value.trim();
-                    if (val && val !== oldName) {
-                        tabsData[tid].name = val;
-                        saveWorkspace();
-                        showToast(`Renamed tab to "${val}"`, 'success');
-                    }
+            t.ondblclick = async () => {
+                const newName = await showCustomPrompt("Rename Tab", "Enter new tab name:", tabsData[tid].name);
+                if (newName && newName.trim()) {
+                    tabsData[tid].name = newName.trim();
                     renderTabs();
-                };
-
-                input.onkeydown = (ke) => {
-                    if (ke.key === 'Enter') {
-                        ke.preventDefault();
-                        commit();
-                    } else if (ke.key === 'Escape') {
-                        ke.preventDefault();
-                        committed = true;
-                        renderTabs();
-                    }
-                };
-                input.onblur = commit;
+                    saveWorkspace();
+                    showToast("Tab renamed", 'success');
+                }
             };
 
             t.onclick = () => switchTab(tid);
@@ -2624,7 +2506,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         updateHUD();
         if (editor && !isDrawTab) editor.focus();
         if (isFocusMode) scheduleFocusDimmingUpdate();
-        if (privacyInspectorModal && !privacyInspectorModal.classList.contains('hidden')) updatePrivacyInspector();
         if (!skipSave) saveWorkspace();
     }
 
@@ -2728,7 +2609,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         } finally {
             isTyping = false;
             updateHUD();
-            setSaveStatus('saved');
         }
     }
 
@@ -2910,7 +2790,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (isBurnMode) return;
             if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
             isTyping = true;
-            setSaveStatus('saving');
             clearTimeout(typingResetTimeout);
             typingResetTimeout = setTimeout(() => { isTyping = false; }, 600);
             updateHUD();
@@ -2919,7 +2798,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (isMarkdown || isSplitMode) updatePreview();
             syncMyCursor();
             if (isFocusMode) scheduleFocusDimmingUpdate();
-            if (privacyInspectorModal && !privacyInspectorModal.classList.contains('hidden')) updatePrivacyInspector();
             clearTimeout(debounceTimeout);
             debounceTimeout = setTimeout(saveWorkspace, 400);
         });
@@ -3086,7 +2964,15 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     // --- Direct Share Modal Trigger ---
     if (shareBtn) {
         shareBtn.addEventListener('click', () => {
-            updateShareLinks();
+            let baseToken = currentToken;
+            if (urlKey) baseToken += '_' + urlKey;
+            const fullEditUrl = window.location.origin + window.location.pathname + '#' + baseToken;
+            const fullViewUrl = window.location.origin + window.location.pathname + '?view=' + baseToken;
+            if (shareEditLink) shareEditLink.value = fullEditUrl;
+            if (shareViewLink) shareViewLink.value = fullViewUrl;
+            if (shareQrImg) {
+                shareQrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(fullEditUrl)}&color=00fff9&bgcolor=000000`;
+            }
             if (shareModal) shareModal.classList.remove('hidden');
         });
     }
@@ -3291,128 +3177,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
     }
 
-    // --- Zero-Knowledge & Privacy Inspector Engine ---
-    function updatePrivacyInspector() {
-        if (!privacyInspectorModal || privacyInspectorModal.classList.contains('hidden')) return;
-
-        // 1. Get current active note plaintext
-        let plain = '';
-        const isDraw = activeTabId && tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
-        if (isDraw) {
-            plain = (tabsData[activeTabId] && tabsData[activeTabId].content) ? `[HTML5 Canvas Drawing: Base64 Encrypted PNG Image (${tabsData[activeTabId].content.length} characters)]` : '[Blank Neon Whiteboard Canvas]';
-        } else if (editor) {
-            plain = editor.value || (tabsData[activeTabId] ? tabsData[activeTabId].content : '');
-        }
-
-        const plainDisplay = plain.trim() ? plain : '(Note is currently empty - start typing to see live AES encryption)';
-        if (inspectorPlaintextView) inspectorPlaintextView.innerText = plainDisplay;
-        if (inspectorPlainLength) inspectorPlainLength.innerText = `${plain.length} chars`;
-
-        // 2. Generate or extract actual live ciphertext
-        let ciphertext = '';
-        if (vaultPassword && typeof CryptoJS !== 'undefined') {
-            try {
-                const rawToEncrypt = plain.trim() ? plain : 'QuickPad Zero-Knowledge Handshake Verification';
-                ciphertext = CryptoJS.AES.encrypt(rawToEncrypt, vaultPassword).toString();
-            } catch(e) {
-                ciphertext = 'U2FsdGVkX1[Error generating cipher stream]';
-            }
-        } else {
-            ciphertext = 'U2FsdGVkX1' + (currentToken || 'workspace_token_active');
-        }
-
-        if (inspectorCiphertextView) inspectorCiphertextView.innerText = ciphertext;
-        if (inspectorCipherLength) inspectorCipherLength.innerText = `${ciphertext.length} bytes`;
-
-        // 3. Extract OpenSSL 8-Byte Salt & Hex Preview
-        let saltHex = '0x4E 0x2A 0x88 0x1F 0x90 0xBC 0x5D 0x33 (64-bit random)';
-        let cipherSampleHex = '0x7B 0x99 0x21 0xFA 0x04 0x82...';
-
-        if (ciphertext.startsWith('U2FsdGVkX1')) {
-            try {
-                const binStr = atob(ciphertext);
-                const bytes = new Uint8Array(binStr.length);
-                for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-                
-                if (bytes.length >= 16) {
-                    const saltBytes = bytes.slice(8, 16);
-                    saltHex = '0x' + Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' 0x');
-                }
-                if (bytes.length > 16) {
-                    const sampleBytes = bytes.slice(16, Math.min(28, bytes.length));
-                    cipherSampleHex = '0x' + Array.from(sampleBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' 0x') + `... (${bytes.length - 16} bytes payload)`;
-                }
-            } catch(err) {}
-        }
-
-        if (inspectorSaltHex) inspectorSaltHex.innerText = saltHex;
-        if (inspectorCipherHex) inspectorCipherHex.innerText = cipherSampleHex;
-    }
-
-    function openPrivacyInspector() {
-        if (!privacyInspectorModal) return;
-        document.querySelectorAll('.dropdown-group').forEach(g => g.classList.remove('active'));
-        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
-        allModals.forEach(m => m && m.classList.add('hidden'));
-
-        privacyInspectorModal.classList.remove('hidden');
-        updatePrivacyInspector();
-    }
-
-    if (privacyInspectorBtn) privacyInspectorBtn.addEventListener('click', openPrivacyInspector);
-    if (closePrivacyInspector) closePrivacyInspector.addEventListener('click', () => privacyInspectorModal && privacyInspectorModal.classList.add('hidden'));
-
-    const brandBadgeEl = document.querySelector('.brand-badge');
-    if (brandBadgeEl) {
-        brandBadgeEl.style.cursor = 'pointer';
-        brandBadgeEl.addEventListener('click', openPrivacyInspector);
-    }
-
-    if (copyInspectionLogBtn) {
-        copyInspectionLogBtn.addEventListener('click', async () => {
-            const isDraw = activeTabId && tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
-            const plain = isDraw ? `[Canvas Drawing: PNG Base64 (${tabsData[activeTabId].content ? tabsData[activeTabId].content.length : 0} chars)]` : (editor ? editor.value : '');
-            let ciphertext = '';
-            if (vaultPassword && typeof CryptoJS !== 'undefined') {
-                try {
-                    ciphertext = CryptoJS.AES.encrypt(plain || 'QuickPad Audit', vaultPassword).toString();
-                } catch(e) {}
-            }
-
-            const salt = inspectorSaltHex ? inspectorSaltHex.innerText : 'Unknown';
-            const timestamp = new Date().toISOString();
-            const keyFragment = window.location.hash ? window.location.hash : '#[Decryption key in hash fragment]';
-
-            const logReport = `=====================================================
-QUICKPAD ZERO-KNOWLEDGE CRYPTOGRAPHIC AUDIT REPORT
-=====================================================
-Timestamp: ${timestamp}
-Workspace Token: ${currentToken}
-Decryption Key Storage: Client URL Hash (${keyFragment})
-Key Isolation Standard: RFC 3986 §3.5 (Never sent across HTTP/WS)
-Encryption Standard: AES-256 (Cipher-Block Chaining / CBC)
-OpenSSL Header: U2FsdGVkX1 ("Salted__" magic header)
-Random Derivation Salt: ${salt}
-Active Document Type: ${isDraw ? 'Neon Whiteboard Canvas (.draw)' : (tabsData[activeTabId] ? tabsData[activeTabId].name : 'Text Note')}
-
-[PLAIN-TEXT SAMPLE (LOCAL MEMORY ONLY)]
-${plain.substring(0, 150)}${plain.length > 150 ? '... [TRUNCATED FOR LOG]' : ''}
-
-[ACTUAL WIRE CIPHERTEXT SENT TO SERVER]
-${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
-
-[SECURITY AUDIT VERIFICATION]
-1. Plaintext Sent to Central Relay: 0 BYTES
-2. Cryptographic Salt Uniqueness: Generated per-note in browser RAM
-3. Key Access: Client-Side Only (Zero-Knowledge)
-=====================================================`;
-
-            await copyToClipboard(logReport, "Cryptographic Audit Log copied to clipboard!");
-        });
-    }
-
     // --- Universal Modal Backdrop & Escape Dismissal ---
-    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal, privacyInspectorModal, cardExportModal];
+    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal];
 
     allModals.forEach(modal => {
         if (!modal) return;
@@ -3431,7 +3197,6 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     if (closeShare) closeShare.addEventListener('click', () => shareModal && shareModal.classList.add('hidden'));
     if (closeProfile) closeProfile.addEventListener('click', () => profileModal && profileModal.classList.add('hidden'));
     if (closeCollaborators) closeCollaborators.addEventListener('click', () => collaboratorsModal && collaboratorsModal.classList.add('hidden'));
-    if (closeCardModal) closeCardModal.addEventListener('click', () => cardExportModal && cardExportModal.classList.add('hidden'));
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
@@ -5524,11 +5289,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         { name: "Create New Workspace", shortcut: "New", action: () => newBtn && newBtn.click() },
         { name: "Create Burn Note (Self-Destruct)", shortcut: "Burn", action: () => burnBtn && burnBtn.click() },
         { name: "💥 Burn Note Right Away", shortcut: "Burn Now", action: () => instantBurnWorkspace() },
-        { name: "Lock Current Tab (Nested Vault)", shortcut: "Lock", action: () => lockCurrentTab() },
-        { name: "Zero-Knowledge & Privacy Inspector", shortcut: "Audit", action: () => openPrivacyInspector() },
-        { name: "Export Note as Image Card", shortcut: "Card", action: () => openCardExportModal() },
-        { name: "Toggle Pomodoro Focus Timer", shortcut: "🍅", action: () => togglePomodoro() },
-        { name: "Reset Pomodoro Timer", shortcut: "Reset", action: () => resetPomodoro() }
+        { name: "Lock Current Tab (Nested Vault)", shortcut: "Lock", action: () => lockCurrentTab() }
     ];
 
     function renderCmdResults(filterText = "") {
@@ -5740,643 +5501,6 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 });
             });
     }
-    // ============================================================
-    // VERSION 4.0 PRO ENGINE
-    // ============================================================
-
-    // 1. Auto-Save & Sync Status Indicator
-    const hudSaveStatus = document.getElementById('hud-save-status');
-    const hudSaveText = document.getElementById('hud-save-text');
-
-    function setSaveStatus(status) {
-        if (!hudSaveStatus || !hudSaveText) return;
-        if (status === 'saving') {
-            hudSaveStatus.classList.remove('saved');
-            hudSaveStatus.classList.add('saving');
-            hudSaveText.textContent = 'Syncing...';
-        } else {
-            hudSaveStatus.classList.remove('saving');
-            hudSaveStatus.classList.add('saved');
-            hudSaveText.textContent = '✓ Encrypted & Saved';
-        }
-    }
-
-    // 2. Floating Medium/Notion-Style Text Formatting Mini-Bar
-    const floatingFormatBar = document.getElementById('floating-format-bar');
-
-    function initFloatingFormatBar() {
-        if (!floatingFormatBar || !editor) return;
-
-        function updateFormatBarPos() {
-            if (isBurnMode || !tabsData[activeTabId] || (tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw'))) {
-                floatingFormatBar.classList.add('hidden');
-                return;
-            }
-            const start = editor.selectionStart;
-            const end = editor.selectionEnd;
-            if (typeof start !== 'number' || typeof end !== 'number' || start === end) {
-                floatingFormatBar.classList.add('hidden');
-                return;
-            }
-
-            const coord = getCaretCoordinates(start);
-            const barWidth = 320;
-            const barHeight = 36;
-
-            let top = coord.top - barHeight - 12;
-            if (top < 10) top = coord.top + 28;
-            let left = coord.left;
-            if (left + barWidth > editor.clientWidth) {
-                left = Math.max(10, editor.clientWidth - barWidth - 10);
-            }
-            if (left < 10) left = 10;
-
-            floatingFormatBar.style.top = `${top}px`;
-            floatingFormatBar.style.left = `${left}px`;
-            floatingFormatBar.classList.remove('hidden');
-        }
-
-        editor.addEventListener('mouseup', () => setTimeout(updateFormatBarPos, 10));
-        editor.addEventListener('keyup', (e) => {
-            if (e.shiftKey || ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
-                setTimeout(updateFormatBarPos, 10);
-            }
-        });
-
-        document.addEventListener('selectionchange', () => {
-            if (document.activeElement !== editor) {
-                floatingFormatBar.classList.add('hidden');
-            }
-        });
-
-        editor.addEventListener('scroll', () => {
-            if (!floatingFormatBar.classList.contains('hidden')) {
-                updateFormatBarPos();
-            }
-        });
-
-        const fmtButtons = floatingFormatBar.querySelectorAll('.fmt-btn');
-        fmtButtons.forEach(btn => {
-            btn.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-            });
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                const fmt = btn.getAttribute('data-format');
-                applyTextFormat(fmt);
-            });
-        });
-    }
-
-    function applyTextFormat(format) {
-        if (!editor) return;
-        const start = editor.selectionStart;
-        const end = editor.selectionEnd;
-        const val = editor.value;
-        const sel = val.substring(start, end);
-        let replacement = '';
-        let newSelStart = start;
-        let newSelEnd = end;
-
-        switch (format) {
-            case 'bold':
-                replacement = `**${sel || 'bold text'}**`;
-                newSelStart = start + 2;
-                newSelEnd = newSelStart + (sel ? sel.length : 9);
-                break;
-            case 'italic':
-                replacement = `*${sel || 'italic text'}*`;
-                newSelStart = start + 1;
-                newSelEnd = newSelStart + (sel ? sel.length : 11);
-                break;
-            case 'strike':
-                replacement = `~~${sel || 'strikethrough'}~~`;
-                newSelStart = start + 2;
-                newSelEnd = newSelStart + (sel ? sel.length : 13);
-                break;
-            case 'h1':
-                replacement = `# ${sel || 'Heading 1'}`;
-                newSelStart = start + 2;
-                newSelEnd = newSelStart + (sel ? sel.length : 9);
-                break;
-            case 'h2':
-                replacement = `## ${sel || 'Heading 2'}`;
-                newSelStart = start + 3;
-                newSelEnd = newSelStart + (sel ? sel.length : 9);
-                break;
-            case 'code':
-                replacement = `\`${sel || 'code'}\``;
-                newSelStart = start + 1;
-                newSelEnd = newSelStart + (sel ? sel.length : 4);
-                break;
-            case 'link':
-                replacement = `[${sel || 'link text'}](https://)`;
-                newSelStart = start + (sel ? sel.length + 3 : 12);
-                newSelEnd = newSelStart + 8;
-                break;
-            case 'task':
-                replacement = `- [ ] ${sel || 'Todo item'}`;
-                newSelStart = start + 6;
-                newSelEnd = newSelStart + (sel ? sel.length : 9);
-                break;
-            case 'quote':
-                replacement = `> ${sel || 'Quote'}`;
-                newSelStart = start + 2;
-                newSelEnd = newSelStart + (sel ? sel.length : 5);
-                break;
-            default:
-                return;
-        }
-
-        editor.value = val.substring(0, start) + replacement + val.substring(end);
-        editor.selectionStart = newSelStart;
-        editor.selectionEnd = newSelEnd;
-        editor.focus();
-
-        if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
-        editor.dispatchEvent(new Event('input'));
-        floatingFormatBar.classList.add('hidden');
-        playMechanicalSound('click');
-    }
-
-    // 3. Pomodoro Focus Timer in HUD
-    const hudPomodoroContainer = document.getElementById('hud-pomodoro-container');
-    const hudPomodoroTime = document.getElementById('hud-pomodoro-time');
-    const hudPomodoroBtn = document.getElementById('hud-pomodoro-btn');
-    const hudPomodoroReset = document.getElementById('hud-pomodoro-reset');
-    const hudPomodoroIcon = document.getElementById('hud-pomodoro-icon');
-
-    let customFocusMins = parseInt(localStorage.getItem('quickpad_pomodoro_mins'), 10) || 25;
-    let customBreakMins = 5;
-    let pomodoroSecs = customFocusMins * 60;
-    let pomodoroMode = 'focus';
-    let pomodoroRunning = false;
-    let pomodoroInterval = null;
-
-    async function promptCustomPomodoroDuration() {
-        const currentMins = pomodoroMode === 'focus' ? Math.round(pomodoroSecs / 60) : customFocusMins;
-        const entered = await showCustomPrompt(
-            "⏱️ Set Focus Duration",
-            "Enter focus duration in minutes (e.g. 15, 25, 45, 60):",
-            String(currentMins || 25)
-        );
-        if (entered !== null && entered.trim()) {
-            const parsed = parseInt(entered.trim(), 10);
-            if (!isNaN(parsed) && parsed > 0 && parsed <= 360) {
-                customFocusMins = parsed;
-                localStorage.setItem('quickpad_pomodoro_mins', customFocusMins);
-                if (pomodoroInterval) clearInterval(pomodoroInterval);
-                pomodoroRunning = false;
-                pomodoroMode = 'focus';
-                pomodoroSecs = customFocusMins * 60;
-                updatePomodoroDisplay();
-                showToast(`🍅 Focus timer set to ${customFocusMins} minutes!`, 'success');
-            } else {
-                showToast("Please enter a valid duration (1 - 360 minutes)", 'error');
-            }
-        }
-    }
-
-    function playPomodoroChime() {
-        try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const freqs = [523.25, 659.25, 783.99, 1046.50];
-            freqs.forEach((f, idx) => {
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(f, ctx.currentTime + idx * 0.12);
-                gain.gain.setValueAtTime(0.2, ctx.currentTime + idx * 0.12);
-                gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + idx * 0.12 + 1.8);
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start(ctx.currentTime + idx * 0.12);
-                osc.stop(ctx.currentTime + idx * 0.12 + 2.0);
-            });
-        } catch(e) {}
-    }
-
-    function updatePomodoroDisplay() {
-        if (!hudPomodoroTime) return;
-        const mins = Math.floor(pomodoroSecs / 60);
-        const secs = pomodoroSecs % 60;
-        hudPomodoroTime.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        if (hudPomodoroBtn) {
-            hudPomodoroBtn.textContent = pomodoroRunning ? '⏸' : '▶';
-            hudPomodoroBtn.title = pomodoroRunning ? "Pause Pomodoro" : "Start Pomodoro";
-        }
-        if (hudPomodoroIcon) {
-            hudPomodoroIcon.textContent = pomodoroMode === 'focus' ? '🍅' : '☕';
-        }
-        if (hudPomodoroContainer) {
-            if (pomodoroMode === 'break') hudPomodoroContainer.classList.add('break-mode');
-            else hudPomodoroContainer.classList.remove('break-mode');
-            hudPomodoroContainer.title = `Pomodoro Focus Timer (${Math.round(pomodoroSecs / 60)}m left) • Click time to change duration`;
-        }
-    }
-
-    function togglePomodoro() {
-        if (pomodoroRunning) {
-            clearInterval(pomodoroInterval);
-            pomodoroRunning = false;
-            updatePomodoroDisplay();
-            showToast("Pomodoro paused", 'info');
-        } else {
-            pomodoroRunning = true;
-            updatePomodoroDisplay();
-            showToast(pomodoroMode === 'focus' ? `🍅 ${Math.round(pomodoroSecs / 60)}m Focus sprint started!` : "☕ 5m Break started!", 'info');
-            pomodoroInterval = setInterval(() => {
-                pomodoroSecs--;
-                if (pomodoroSecs <= 0) {
-                    clearInterval(pomodoroInterval);
-                    pomodoroRunning = false;
-                    playPomodoroChime();
-                    if (pomodoroMode === 'focus') {
-                        pomodoroMode = 'break';
-                        pomodoroSecs = customBreakMins * 60;
-                        showToast("🍅 Focus session complete! Time for a 5-minute break.", 'success');
-                    } else {
-                        pomodoroMode = 'focus';
-                        pomodoroSecs = customFocusMins * 60;
-                        showToast("🚀 Break over! Ready to focus?", 'info');
-                    }
-                    updatePomodoroDisplay();
-                } else {
-                    updatePomodoroDisplay();
-                }
-            }, 1000);
-        }
-    }
-
-    function resetPomodoro() {
-        if (pomodoroInterval) clearInterval(pomodoroInterval);
-        pomodoroRunning = false;
-        pomodoroSecs = (pomodoroMode === 'focus' ? customFocusMins : customBreakMins) * 60;
-        updatePomodoroDisplay();
-        showToast("Pomodoro timer reset", 'info');
-    }
-
-    function initPomodoroTimer() {
-        if (hudPomodoroBtn) {
-            hudPomodoroBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                togglePomodoro();
-            });
-        }
-        if (hudPomodoroReset) {
-            hudPomodoroReset.addEventListener('click', (e) => {
-                e.stopPropagation();
-                resetPomodoro();
-            });
-        }
-        if (hudPomodoroTime) {
-            hudPomodoroTime.style.cursor = 'pointer';
-            hudPomodoroTime.addEventListener('click', promptCustomPomodoroDuration);
-        }
-        if (hudPomodoroIcon) {
-            hudPomodoroIcon.style.cursor = 'pointer';
-            hudPomodoroIcon.addEventListener('click', promptCustomPomodoroDuration);
-        }
-        if (hudPomodoroContainer) {
-            hudPomodoroContainer.addEventListener('click', (e) => {
-                if (e.target !== hudPomodoroBtn && e.target !== hudPomodoroReset) {
-                    promptCustomPomodoroDuration();
-                }
-            });
-        }
-        updatePomodoroDisplay();
-    }
-
-    // 4. Beautiful Note PNG / Code Card Generator
-    const exportCardBtn = document.getElementById('export-card-btn');
-    const cardRenderCanvas = document.getElementById('card-render-canvas');
-    const cardFontSizeSelect = document.getElementById('card-font-size-select');
-    const cardWatermarkCheck = document.getElementById('card-watermark-check');
-    const cardCopyImgBtn = document.getElementById('card-copy-img-btn');
-    const cardDownloadPngBtn = document.getElementById('card-download-png-btn');
-    const cardThemeButtons = document.querySelectorAll('.card-theme-btn');
-
-    let currentCardTheme = 'cyber';
-
-    const CARD_THEMES = {
-        cyber: {
-            bgGrad1: '#050c18',
-            bgGrad2: '#020409',
-            cardBg: 'rgba(9, 17, 34, 0.94)',
-            cardBorder: 'rgba(0, 255, 249, 0.35)',
-            cardGlow: 'rgba(0, 255, 249, 0.25)',
-            textPrimary: '#e2e8f0',
-            textTitle: '#00fff9',
-            lineNums: '#475569'
-        },
-        matrix: {
-            bgGrad1: '#041608',
-            bgGrad2: '#010502',
-            cardBg: 'rgba(6, 22, 10, 0.95)',
-            cardBorder: 'rgba(0, 255, 102, 0.4)',
-            cardGlow: 'rgba(0, 255, 102, 0.25)',
-            textPrimary: '#00ff66',
-            textTitle: '#55ff99',
-            lineNums: '#1b4d27'
-        },
-        sunset: {
-            bgGrad1: '#24081c',
-            bgGrad2: '#080208',
-            cardBg: 'rgba(32, 10, 26, 0.94)',
-            cardBorder: 'rgba(255, 0, 85, 0.4)',
-            cardGlow: 'rgba(255, 0, 85, 0.25)',
-            textPrimary: '#f8fafc',
-            textTitle: '#ff4d88',
-            lineNums: '#641b38'
-        },
-        purple: {
-            bgGrad1: '#180a2c',
-            bgGrad2: '#06020c',
-            cardBg: 'rgba(22, 12, 40, 0.94)',
-            cardBorder: 'rgba(176, 38, 255, 0.4)',
-            cardGlow: 'rgba(176, 38, 255, 0.25)',
-            textPrimary: '#f1f5f9',
-            textTitle: '#c056ff',
-            lineNums: '#4c267a'
-        },
-        midnight: {
-            bgGrad1: '#0f172a',
-            bgGrad2: '#020617',
-            cardBg: 'rgba(15, 23, 42, 0.95)',
-            cardBorder: 'rgba(148, 163, 184, 0.3)',
-            cardGlow: 'rgba(59, 130, 246, 0.15)',
-            textPrimary: '#cbd5e1',
-            textTitle: '#94a3b8',
-            lineNums: '#334155'
-        }
-    };
-
-    function renderNoteCard() {
-        if (!cardRenderCanvas) return;
-        const ctx = cardRenderCanvas.getContext('2d');
-        const theme = CARD_THEMES[currentCardTheme] || CARD_THEMES.cyber;
-        const baseFontSize = parseInt(cardFontSizeSelect ? cardFontSizeSelect.value : 20, 10);
-        const showWatermark = cardWatermarkCheck ? cardWatermarkCheck.checked : true;
-
-        const isDraw = activeTabId && tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
-        const rawText = isDraw ? "/* QuickPad Whiteboard Drawing Tab */" : (editor ? editor.value : "");
-        const lines = rawText.split('\n');
-        const tabTitle = (tabsData[activeTabId] ? tabsData[activeTabId].name : 'note.txt') || 'quickpad-note.txt';
-
-        const scale = 2;
-        const width = 1100 * scale;
-        const padding = 60 * scale;
-        const cardPadding = 36 * scale;
-        const lineHeight = Math.round(baseFontSize * 1.55) * scale;
-        const fontSizePx = baseFontSize * scale;
-
-        ctx.font = `${fontSizePx}px "Fira Code", monospace`;
-        const maxTextWidth = width - (padding * 2) - (cardPadding * 2) - (50 * scale);
-        const wrappedLines = [];
-
-        const maxInputLines = Math.min(lines.length, 50);
-        for (let i = 0; i < maxInputLines; i++) {
-            const line = lines[i];
-            if (line.length === 0) {
-                wrappedLines.push({ text: '', lineNum: i + 1 });
-                continue;
-            }
-            let currentLine = '';
-            for (let char of line) {
-                const testLine = currentLine + char;
-                if (ctx.measureText(testLine).width > maxTextWidth) {
-                    wrappedLines.push({ text: currentLine, lineNum: currentLine === '' ? i + 1 : null });
-                    currentLine = char;
-                } else {
-                    currentLine = testLine;
-                }
-            }
-            if (currentLine) {
-                wrappedLines.push({ text: currentLine, lineNum: wrappedLines.length === 0 || wrappedLines[wrappedLines.length - 1].lineNum === null ? i + 1 : null });
-            }
-            if (wrappedLines.length > 55) break;
-        }
-
-        if (lines.length > maxInputLines || wrappedLines.length > 55) {
-            wrappedLines.push({ text: `... (${lines.length - maxInputLines} more lines)`, lineNum: null });
-        }
-
-        const titleBarHeight = 44 * scale;
-        const footerHeight = showWatermark ? (36 * scale) : (16 * scale);
-        const cardContentHeight = Math.max(160 * scale, wrappedLines.length * lineHeight + (20 * scale));
-        const cardHeight = titleBarHeight + cardContentHeight + footerHeight;
-        const height = cardHeight + (padding * 2);
-
-        cardRenderCanvas.width = width;
-        cardRenderCanvas.height = height;
-
-        const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-        bgGrad.addColorStop(0, theme.bgGrad1);
-        bgGrad.addColorStop(1, theme.bgGrad2);
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, width, height);
-
-        const glowRad = ctx.createRadialGradient(width / 2, height / 2, 80 * scale, width / 2, height / 2, width / 1.5);
-        glowRad.addColorStop(0, theme.cardGlow);
-        glowRad.addColorStop(1, 'transparent');
-        ctx.fillStyle = glowRad;
-        ctx.fillRect(0, 0, width, height);
-
-        const cardX = padding;
-        const cardY = padding;
-        const cardW = width - (padding * 2);
-        const cardH = cardHeight;
-        const cardRadius = 16 * scale;
-
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-        ctx.shadowBlur = 40 * scale;
-        ctx.shadowOffsetY = 20 * scale;
-
-        function roundRect(c, x, y, w, h, r) {
-            c.beginPath();
-            c.moveTo(x + r, y);
-            c.lineTo(x + w - r, y);
-            c.quadraticCurveTo(x + w, y, x + w, y + r);
-            c.lineTo(x + w, y + h - r);
-            c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            c.lineTo(x + r, y + h);
-            c.quadraticCurveTo(x, y + h, x, y + h - r);
-            c.lineTo(x, y + r);
-            c.quadraticCurveTo(x, y, x + r, y);
-            c.closePath();
-        }
-
-        roundRect(ctx, cardX, cardY, cardW, cardH, cardRadius);
-        ctx.fillStyle = theme.cardBg;
-        ctx.fill();
-        ctx.restore();
-
-        roundRect(ctx, cardX, cardY, cardW, cardH, cardRadius);
-        ctx.strokeStyle = theme.cardBorder;
-        ctx.lineWidth = 1.5 * scale;
-        ctx.stroke();
-
-        const dotY = cardY + (22 * scale);
-        const dotR = 6 * scale;
-        const dotSpacing = 18 * scale;
-        const dotStartX = cardX + (24 * scale);
-
-        const dots = ['#ff5f56', '#ffbd2e', '#27c93f'];
-        dots.forEach((color, idx) => {
-            ctx.beginPath();
-            ctx.arc(dotStartX + (idx * dotSpacing), dotY, dotR, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.fill();
-        });
-
-        ctx.fillStyle = theme.textTitle;
-        ctx.font = `600 ${14 * scale}px "Inter", sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText(tabTitle, cardX + (cardW / 2), dotY + (5 * scale));
-
-        ctx.beginPath();
-        ctx.moveTo(cardX, cardY + titleBarHeight);
-        ctx.lineTo(cardX + cardW, cardY + titleBarHeight);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.lineWidth = 1 * scale;
-        ctx.stroke();
-
-        ctx.textAlign = 'left';
-        let currentY = cardY + titleBarHeight + (26 * scale);
-        const textStartX = cardX + (28 * scale) + (36 * scale);
-
-        wrappedLines.forEach((item) => {
-            if (item.lineNum !== null) {
-                ctx.fillStyle = theme.lineNums;
-                ctx.font = `500 ${fontSizePx * 0.85}px "Fira Code", monospace`;
-                ctx.textAlign = 'right';
-                ctx.fillText(String(item.lineNum), textStartX - (14 * scale), currentY);
-            }
-
-            ctx.textAlign = 'left';
-            ctx.fillStyle = theme.textPrimary;
-            ctx.font = `${fontSizePx}px "Fira Code", monospace`;
-            ctx.fillText(item.text, textStartX, currentY);
-
-            currentY += lineHeight;
-        });
-
-        if (showWatermark) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-            ctx.font = `500 ${12 * scale}px "Inter", sans-serif`;
-            ctx.textAlign = 'right';
-            ctx.fillText('⚡ QuickPad • Zero-Knowledge E2EE • quickpad.org', cardX + cardW - (20 * scale), cardY + cardH - (14 * scale));
-        }
-    }
-
-    function openCardExportModal() {
-        if (!cardExportModal) return;
-        renderNoteCard();
-        cardExportModal.classList.remove('hidden');
-    }
-
-    function initCardExporter() {
-        if (exportCardBtn) exportCardBtn.addEventListener('click', openCardExportModal);
-
-        if (cardFontSizeSelect) cardFontSizeSelect.addEventListener('change', renderNoteCard);
-        if (cardWatermarkCheck) cardWatermarkCheck.addEventListener('change', renderNoteCard);
-
-        cardThemeButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                cardThemeButtons.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentCardTheme = btn.getAttribute('data-card-theme') || 'cyber';
-                renderNoteCard();
-            });
-        });
-
-        if (cardDownloadPngBtn) {
-            cardDownloadPngBtn.addEventListener('click', () => {
-                if (!cardRenderCanvas) return;
-                const tabName = (tabsData[activeTabId] ? tabsData[activeTabId].name : 'note').replace(/\.[^/.]+$/, "");
-                const link = document.createElement('a');
-                link.download = `quickpad-${tabName}-card.png`;
-                link.href = cardRenderCanvas.toDataURL('image/png');
-                link.click();
-                showToast("📥 Card downloaded as PNG!", 'success');
-            });
-        }
-
-        if (cardCopyImgBtn) {
-            cardCopyImgBtn.addEventListener('click', async () => {
-                if (!cardRenderCanvas) return;
-                try {
-                    cardRenderCanvas.toBlob(async (blob) => {
-                        if (!blob) throw new Error("Canvas export failed");
-                        await navigator.clipboard.write([
-                            new ClipboardItem({ 'image/png': blob })
-                        ]);
-                        showToast("📋 Card image copied to clipboard!", 'success');
-                    });
-                } catch(e) {
-                    showToast("Clipboard copy failed: " + e.message, 'error');
-                }
-            });
-        }
-    }
-
-    // 5. Password-Protected One-Click Read-Only Sharing
-    const sharePassCheckbox = document.getElementById('share-pass-checkbox');
-    const sharePassContainer = document.getElementById('share-pass-container');
-    const sharePassInput = document.getElementById('share-pass-input');
-    const sharePassGenBtn = document.getElementById('share-pass-gen-btn');
-
-    function updateShareLinks() {
-        let baseToken = currentToken;
-        if (urlKey) baseToken += '_' + urlKey;
-        const fullEditUrl = window.location.origin + window.location.pathname + '#' + baseToken;
-        let fullViewUrl = window.location.origin + window.location.pathname + '?view=' + baseToken;
-
-        if (sharePassCheckbox && sharePassCheckbox.checked && sharePassInput && sharePassInput.value.trim()) {
-            const pass = sharePassInput.value.trim();
-            if (typeof CryptoJS !== 'undefined') {
-                const encKey = CryptoJS.AES.encrypt(urlKey || '', pass).toString();
-                fullViewUrl = window.location.origin + window.location.pathname + '?view=' + currentToken + '_' + encodeURIComponent(encKey) + '&protected=1';
-            }
-        }
-
-        if (shareEditLink) shareEditLink.value = fullEditUrl;
-        if (shareViewLink) shareViewLink.value = fullViewUrl;
-        if (shareQrImg) {
-            shareQrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(fullEditUrl)}&color=00fff9&bgcolor=000000`;
-        }
-    }
-
-    function initSharePassProtection() {
-        if (!sharePassCheckbox) return;
-
-        sharePassCheckbox.addEventListener('change', () => {
-            if (sharePassCheckbox.checked) {
-                if (sharePassContainer) sharePassContainer.classList.remove('hidden');
-                if (sharePassInput && !sharePassInput.value) {
-                    sharePassInput.value = Math.random().toString(36).substring(2, 8);
-                }
-            } else {
-                if (sharePassContainer) sharePassContainer.classList.add('hidden');
-            }
-            updateShareLinks();
-        });
-
-        if (sharePassInput) {
-            sharePassInput.addEventListener('input', updateShareLinks);
-        }
-
-        if (sharePassGenBtn) {
-            sharePassGenBtn.addEventListener('click', () => {
-                if (sharePassInput) {
-                    sharePassInput.value = Math.random().toString(36).substring(2, 8);
-                    updateShareLinks();
-                }
-            });
-        }
-    }
-
     // Start QuickPad Engine
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
