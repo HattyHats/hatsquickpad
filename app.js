@@ -2091,6 +2091,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         if (tabsData[data.tid]) {
                             tabsData[data.tid].content = data.content;
                             lastSavedTabsJSON = JSON.stringify(tabsData);
+                            lastSyncedServerTabs[data.tid] = { content: data.content };
+                            tabsContentDirty = false;
                             if (data.tid === activeTabId) {
                                 const isFocused = (document.activeElement === editor);
                                 if (!isTyping || !isFocused) {
@@ -2199,10 +2201,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     if (docSnap && docSnap.exists) {
                         const data = docSnap.data();
 
-                        // Skip stale out-of-order snapshots
+                        // Track latest seen timestamp without dropping cross-device snapshots due to client clock skew
                         if (data.updated_at) {
-                            if (data.updated_at < lastSeenServerTimestamp) return;
-                            lastSeenServerTimestamp = data.updated_at;
+                            lastSeenServerTimestamp = Math.max(lastSeenServerTimestamp, data.updated_at);
                         }
 
                         // If snapshot is an echo of this tab's own recent write, update baseline & skip clobbering
@@ -2382,8 +2383,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     } else if (localChanged && !serverChanged) {
                                         // Local changes pending; will be saved via debounced input save (prevents write ping-pong loop)
                                     } else if (serverChanged && !localChanged) {
-                                        if (tabsContentDirty) return;
                                         tabsData[tid].content = content; 
+                                        tabsContentDirty = false;
                                         if (tid === activeTabId && (!isTyping || document.activeElement !== editor)) {
                                             const isDraw = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
                                             if (isDraw) {
