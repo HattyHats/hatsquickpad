@@ -2,9 +2,17 @@
 (function() {
     'use strict';
 
-    // Generate or Retrieve Device ID
-    const myDeviceId = localStorage.getItem('quickpad_device_id') || (Date.now().toString() + Math.random().toString(36).substring(2));
-    localStorage.setItem('quickpad_device_id', myDeviceId);
+    // Generate Unique In-Memory Collaborator ID for this tab session
+    const myDeviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+    const myTabInstanceId = 'tab_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+
+    window.__quickpadDebug = {
+        getActiveTab: () => activeTabId,
+        getTabs: () => tabsData,
+        getIsTyping: () => isTyping,
+        getDeviceId: () => myDeviceId,
+        getTabInstance: () => myTabInstanceId
+    };
 
     // iOS Keyboard Dismiss Fix
     window.addEventListener('focusout', () => window.scrollTo(0, 0));
@@ -2002,6 +2010,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 currentToken = rawToken;
                 urlKey = null;
             }
+            window.__currentToken = currentToken;
+            window.__rawToken = rawToken;
 
             // Seed friendly welcome template if fresh workspace
             if (!viewParam && !padParam && !window.location.hash && tabsData['main'] && !tabsData['main'].content) {
@@ -2082,39 +2092,63 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 try { localSyncChannel.close(); } catch(e) {}
             }
             localSyncChannel = new BroadcastChannel('quickpad_tabsync_' + token);
+            window.__localSyncChannel = localSyncChannel;
+            window.__localSyncToken = token;
+            if (!window.__receivedLocalMessages) window.__receivedLocalMessages = [];
             localSyncChannel.onmessage = (event) => {
                 const data = event.data;
-                if (!data || data.senderId === myDeviceId) return;
+                if (!window.__receivedLocalMessages) window.__receivedLocalMessages = [];
+                window.__receivedLocalMessages.push({ time: Date.now(), data });
+                window.__lastLocalSyncReceived = data;
+                window.__lastLocalSyncTime = Date.now();
+                if (!data || data.senderTabInstance === myTabInstanceId) return;
 
-                if (data.type === 'tab_content') {
-                    if (tabsData[data.tid]) {
-                        tabsData[data.tid].content = data.content;
-                        lastSyncedServerTabs[data.tid] = { content: data.content };
-                        lastSavedTabsJSON = JSON.stringify(tabsData);
-                        if (data.tid === activeTabId) {
-                            if (!isTyping) {
-                                const isDraw = tabsData[data.tid].name && tabsData[data.tid].name.endsWith('.draw');
-                                if (isDraw) {
-                                    if (typeof wbIsDrawing !== 'undefined' && !wbIsDrawing) {
-                                        loadWhiteboardFromTab(data.content);
+                if (!window.__localSyncDebugTrace) window.__localSyncDebugTrace = [];
+                try {
+                    if (data.type === 'tab_content') {
+                        const hasTab = !!tabsData[data.tid];
+                        window.__localSyncDebugTrace.push({
+                            type: 'tab_content',
+                            tid: data.tid,
+                            activeTabId: activeTabId,
+                            hasTab: hasTab,
+                            isTyping: isTyping,
+                            hasEditor: !!editor
+                        });
+                        if (tabsData[data.tid]) {
+                            tabsData[data.tid].content = data.content;
+                            lastSavedTabsJSON = JSON.stringify(tabsData);
+                            if (data.tid === activeTabId) {
+                                const isFocused = (document.activeElement === editor);
+                                if (!isTyping || !isFocused) {
+                                    const isDraw = tabsData[data.tid].name && tabsData[data.tid].name.endsWith('.draw');
+                                    if (isDraw) {
+                                        if (typeof wbIsDrawing !== 'undefined' && !wbIsDrawing) {
+                                            loadWhiteboardFromTab(data.content);
+                                        }
+                                    } else if (editor) {
+                                        if (isFocused) {
+                                            const start = editor.selectionStart;
+                                            const end = editor.selectionEnd;
+                                            editor.value = data.content;
+                                            editor.setSelectionRange(start, end);
+                                        } else {
+                                            editor.value = data.content;
+                                        }
+                                        updatePreview();
+                                        updateHUD();
+                                        window.__localSyncDebugTrace.push({ step: 'editor_updated', val: editor.value });
                                     }
-                                } else if (editor) {
-                                    const isFocused = (document.activeElement === editor);
-                                    if (isFocused) {
-                                        const start = editor.selectionStart;
-                                        const end = editor.selectionEnd;
-                                        editor.value = data.content;
-                                        editor.setSelectionRange(start, end);
-                                    } else {
-                                        editor.value = data.content;
-                                    }
-                                    updatePreview();
-                                    updateHUD();
+                                } else {
+                                    window.__localSyncDebugTrace.push({ step: 'skipped_isTyping' });
                                 }
+                            } else {
+                                window.__localSyncDebugTrace.push({ step: 'skipped_not_activeTab' });
                             }
+                        } else {
+                            window.__localSyncDebugTrace.push({ step: 'skipped_no_tabData' });
                         }
-                    }
-                } else if (data.type === 'tabs_structure') {
+                    } else if (data.type === 'tabs_structure') {
                     if (data.tabs) {
                         tabsData = data.tabs;
                         lastSavedTabsJSON = JSON.stringify(tabsData);
@@ -2162,6 +2196,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         });
                     }
                 }
+                } catch(err) {
+                    window.__lastLocalSyncError = err.message + '\n' + err.stack;
+                }
             };
 
             // Request initial sync from any open tab on this device
@@ -2177,6 +2214,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     function broadcastLocalSync(msg) {
         if (!localSyncChannel) return;
         try {
+            msg.senderTabInstance = myTabInstanceId;
+            msg.senderId = myDeviceId;
+            if (!window.__sentLocalMessages) window.__sentLocalMessages = [];
+            window.__sentLocalMessages.push({ time: Date.now(), msg: JSON.parse(JSON.stringify(msg)) });
+            window.__lastLocalSyncSent = msg;
+            window.__lastLocalSyncSentTime = Date.now();
             localSyncChannel.postMessage(msg);
         } catch(e) {}
     }
@@ -2354,7 +2397,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         // Local changes pending; will be saved via debounced input save (prevents write ping-pong loop)
                                     } else if (serverChanged && !localChanged) {
                                         tabsData[tid].content = content; 
-                                        if (tid === activeTabId && !isTyping) {
+                                        if (tid === activeTabId && (!isTyping || document.activeElement !== editor)) {
                                             const isDraw = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
                                             if (isDraw) {
                                                 if (typeof wbIsDrawing !== 'undefined' && !wbIsDrawing) {
@@ -2833,6 +2876,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
             const payload = {
                 is_encrypted: !!vaultPassword,
+                updated_at: Date.now(),
+                last_writer: myDeviceId,
                 cursors: {
                     [myDeviceId]: {
                         pos: editor.selectionStart || 0,
