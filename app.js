@@ -6,14 +6,6 @@
     const myDeviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
     const myTabInstanceId = 'tab_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
 
-    window.__quickpadDebug = {
-        getActiveTab: () => activeTabId,
-        getTabs: () => tabsData,
-        getIsTyping: () => isTyping,
-        getDeviceId: () => myDeviceId,
-        getTabInstance: () => myTabInstanceId
-    };
-
     // iOS Keyboard Dismiss Fix
     window.addEventListener('focusout', () => window.scrollTo(0, 0));
     window.addEventListener('hashchange', () => window.location.reload());
@@ -2010,8 +2002,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 currentToken = rawToken;
                 urlKey = null;
             }
-            window.__currentToken = currentToken;
-            window.__rawToken = rawToken;
 
             // Seed friendly welcome template if fresh workspace
             if (!viewParam && !padParam && !window.location.hash && tabsData['main'] && !tabsData['main'].content) {
@@ -2092,29 +2082,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 try { localSyncChannel.close(); } catch(e) {}
             }
             localSyncChannel = new BroadcastChannel('quickpad_tabsync_' + token);
-            window.__localSyncChannel = localSyncChannel;
-            window.__localSyncToken = token;
-            if (!window.__receivedLocalMessages) window.__receivedLocalMessages = [];
             localSyncChannel.onmessage = (event) => {
                 const data = event.data;
-                if (!window.__receivedLocalMessages) window.__receivedLocalMessages = [];
-                window.__receivedLocalMessages.push({ time: Date.now(), data });
-                window.__lastLocalSyncReceived = data;
-                window.__lastLocalSyncTime = Date.now();
                 if (!data || data.senderTabInstance === myTabInstanceId) return;
 
-                if (!window.__localSyncDebugTrace) window.__localSyncDebugTrace = [];
                 try {
                     if (data.type === 'tab_content') {
-                        const hasTab = !!tabsData[data.tid];
-                        window.__localSyncDebugTrace.push({
-                            type: 'tab_content',
-                            tid: data.tid,
-                            activeTabId: activeTabId,
-                            hasTab: hasTab,
-                            isTyping: isTyping,
-                            hasEditor: !!editor
-                        });
                         if (tabsData[data.tid]) {
                             tabsData[data.tid].content = data.content;
                             lastSavedTabsJSON = JSON.stringify(tabsData);
@@ -2137,16 +2110,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         }
                                         updatePreview();
                                         updateHUD();
-                                        window.__localSyncDebugTrace.push({ step: 'editor_updated', val: editor.value });
                                     }
-                                } else {
-                                    window.__localSyncDebugTrace.push({ step: 'skipped_isTyping' });
                                 }
-                            } else {
-                                window.__localSyncDebugTrace.push({ step: 'skipped_not_activeTab' });
                             }
-                        } else {
-                            window.__localSyncDebugTrace.push({ step: 'skipped_no_tabData' });
                         }
                     } else if (data.type === 'tabs_structure') {
                     if (data.tabs) {
@@ -2216,15 +2182,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         try {
             msg.senderTabInstance = myTabInstanceId;
             msg.senderId = myDeviceId;
-            if (!window.__sentLocalMessages) window.__sentLocalMessages = [];
-            window.__sentLocalMessages.push({ time: Date.now(), msg: JSON.parse(JSON.stringify(msg)) });
-            window.__lastLocalSyncSent = msg;
-            window.__lastLocalSyncSentTime = Date.now();
             localSyncChannel.postMessage(msg);
         } catch(e) {}
     }
 
     // --- Real-Time Firestore Synchronization ---
+    let lastSeenServerTimestamp = 0;
     function setupRealtimeSync(token) {
         if (!db) return;
         if (unsubscribeWorkspace) unsubscribeWorkspace();
@@ -2235,6 +2198,29 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 try {
                     if (docSnap && docSnap.exists) {
                         const data = docSnap.data();
+
+                        // Skip stale out-of-order snapshots
+                        if (data.updated_at) {
+                            if (data.updated_at < lastSeenServerTimestamp) return;
+                            lastSeenServerTimestamp = data.updated_at;
+                        }
+
+                        // If snapshot is an echo of this tab's own recent write, update baseline & skip clobbering
+                        if (data.last_writer === myDeviceId) {
+                            if (data.tabs) {
+                                for (let tid in data.tabs) {
+                                    let content = data.tabs[tid].content || '';
+                                    if (vaultPassword && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                                        try {
+                                            const dec = CryptoJS.AES.decrypt(content, vaultPassword).toString(CryptoJS.enc.Utf8);
+                                            if (dec) content = dec;
+                                        } catch(e) {}
+                                    }
+                                    lastSyncedServerTabs[tid] = { content: content };
+                                }
+                            }
+                            return;
+                        }
                     
                         // Check if burned or expired
                         if (data.burned || (data.expires_at && Date.now() > data.expires_at)) {
@@ -2396,6 +2382,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     } else if (localChanged && !serverChanged) {
                                         // Local changes pending; will be saved via debounced input save (prevents write ping-pong loop)
                                     } else if (serverChanged && !localChanged) {
+                                        if (tabsContentDirty) return;
                                         tabsData[tid].content = content; 
                                         if (tid === activeTabId && (!isTyping || document.activeElement !== editor)) {
                                             const isDraw = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
@@ -2413,12 +2400,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                                 updateHUD(); 
                                             }
                                         }
-                                        broadcastLocalSync({
-                                            type: 'tab_content',
-                                            tid: tid,
-                                            content: content,
-                                            senderId: myDeviceId
-                                        });
                                     }
                                 }
                                 lastSyncedServerTabs[tid] = { content: content };
