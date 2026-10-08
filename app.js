@@ -29,9 +29,6 @@
                 firebase.initializeApp(firebaseConfig);
             }
             db = firebase.firestore();
-            try {
-                db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
-            } catch(e) {}
         }
     } catch (err) {
         console.warn("Firebase initialization warning:", err);
@@ -5990,6 +5987,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             try { strokesUnsubscribe(); } catch(e) {}
             strokesUnsubscribe = null;
         }
+
+        const hasDrawTab = Object.values(tabsData).some(t => t && t.name && t.name.endsWith('.draw'));
+        if (!hasDrawTab) return;
         
         try {
             strokesUnsubscribe = db.collection("workspaces").doc(currentToken).collection("strokes")
