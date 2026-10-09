@@ -2513,7 +2513,58 @@ body.zen-mode #zen-exit-btn { display: block; }
     }
 }
 
-/* --- WebRTC Voice Walkie-Talkie --- */
+/* --- WebRTC Voice Walkie-Talkie & Voice Pill --- */
+.hud-voice-pill {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    height: 20px;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+.hud-voice-pill:hover {
+    border-color: rgba(0, 255, 249, 0.4);
+}
+.hud-voice-pill .hud-voice-btn {
+    border: none;
+    background: transparent;
+    border-radius: 9px 0 0 9px;
+    height: 100%;
+    padding: 0 5px 0 6px;
+    gap: 4px;
+}
+.hud-voice-mask-tag {
+    font-size: 0.62rem;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(0, 255, 249, 0.12);
+    color: var(--primary-color);
+    border: 1px solid rgba(0, 255, 249, 0.25);
+    line-height: 1.1;
+    font-weight: 500;
+}
+.hud-voice-mask-btn {
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--border-color);
+    color: var(--text-muted);
+    height: 100%;
+    padding: 0 5px;
+    cursor: pointer;
+    font-size: 0.72rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0 9px 9px 0;
+    transition: all 0.15s ease;
+}
+.hud-voice-mask-btn:hover {
+    color: var(--primary-color);
+    background: rgba(0, 255, 249, 0.12);
+}
 .hud-voice-btn {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border-color);
@@ -2538,9 +2589,9 @@ body.zen-mode #zen-exit-btn { display: block; }
     color: #fff;
 }
 .hud-voice-btn.transmitting {
-    background: rgba(255, 0, 85, 0.25);
-    border-color: #ff0055;
-    color: #ff0055;
+    background: rgba(255, 0, 85, 0.25) !important;
+    border-color: #ff0055 !important;
+    color: #ff0055 !important;
     box-shadow: 0 0 10px rgba(255, 0, 85, 0.5);
     animation: voice-pulse 1s infinite;
 }
@@ -2563,6 +2614,188 @@ body.zen-mode #zen-exit-btn { display: block; }
 @keyframes peer-speaking-pulse {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.2); }
+}
+
+/* --- Voice Mask Modal & Presets --- */
+.voice-mask-modal-content {
+    max-width: 580px;
+    width: 92%;
+    padding: 24px;
+    box-sizing: border-box;
+}
+.voice-badge {
+    background: rgba(0, 255, 249, 0.1);
+    border-color: rgba(0, 255, 249, 0.35);
+    color: var(--primary-color);
+}
+.voice-monitor-card {
+    background: rgba(10, 15, 29, 0.75);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+}
+.voice-monitor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.voice-monitor-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-color);
+}
+.audio-signal-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #64748b;
+    box-shadow: 0 0 6px #64748b;
+    transition: all 0.2s;
+}
+.audio-signal-dot.active {
+    background: #00ff66;
+    box-shadow: 0 0 10px #00ff66;
+}
+.audio-signal-dot.transmitting {
+    background: #ff0055;
+    box-shadow: 0 0 12px #ff0055;
+}
+.voice-test-btn {
+    background: rgba(0, 255, 249, 0.08);
+    border: 1px solid rgba(0, 255, 249, 0.3);
+    color: var(--primary-color);
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+.voice-test-btn:hover {
+    background: rgba(0, 255, 249, 0.2);
+    box-shadow: 0 0 12px rgba(0, 255, 249, 0.3);
+}
+.voice-test-btn.testing {
+    background: rgba(0, 255, 102, 0.2);
+    border-color: #00ff66;
+    color: #00ff66;
+    box-shadow: 0 0 12px rgba(0, 255, 102, 0.4);
+}
+.voice-visualizer-canvas {
+    width: 100%;
+    height: 50px;
+    background: rgba(5, 8, 16, 0.6);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    display: block;
+}
+.voice-monitor-hint {
+    margin-top: 8px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+.voice-presets-title {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+}
+.voice-presets-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+@media (max-width: 520px) {
+    .voice-presets-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.voice-preset-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    position: relative;
+}
+.voice-preset-card:hover {
+    background: rgba(0, 255, 249, 0.05);
+    border-color: rgba(0, 255, 249, 0.4);
+    transform: translateY(-1px);
+}
+.voice-preset-card.active {
+    background: rgba(0, 255, 249, 0.1);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 14px rgba(0, 255, 249, 0.25);
+}
+.preset-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+.preset-info {
+    flex: 1;
+    min-width: 0;
+}
+.preset-name {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-color);
+    margin-bottom: 2px;
+}
+.voice-preset-card.active .preset-name {
+    color: var(--primary-color);
+}
+.preset-desc {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.3;
+}
+.preset-check {
+    opacity: 0;
+    color: var(--primary-color);
+    font-weight: bold;
+    font-size: 1rem;
+    transition: opacity 0.2s;
+}
+.voice-preset-card.active .preset-check {
+    opacity: 1;
+}
+.voice-modal-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.voice-action-btn {
+    padding: 12px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.voice-ptt-shortcut-hint {
+    text-align: center;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
 }
 
 /* --- Encrypted Whiteboard Canvas Tab (.draw) --- */
