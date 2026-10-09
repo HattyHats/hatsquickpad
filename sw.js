@@ -1,4 +1,4 @@
-const CACHE_NAME = 'quickpad-v63';
+const CACHE_NAME = 'quickpad-v60';
 const ASSETS = [
   './',
   './index.html',
