@@ -192,6 +192,9 @@
     // --- HUD Enhancements & Voice Walkie-Talkie ---
     const hudVoiceBtn = document.getElementById('hud-voice-btn');
     const hudVoiceStatus = document.getElementById('hud-voice-status');
+    const hudVoiceMaskTag = document.getElementById('hud-voice-mask-tag');
+    const hudVoiceMaskBtn = document.getElementById('hud-voice-mask-btn');
+    const hudVoiceMaskToolBtn = document.getElementById('hud-voice-mask-tool-btn');
     const hudDictateBtn = document.getElementById('hud-dictate-btn');
     const hudDictateStatus = document.getElementById('hud-dictate-status');
     const flareBar = document.getElementById('flare-bar');
@@ -262,6 +265,20 @@
     const wormholeProgressFill = document.getElementById('wormhole-progress-fill');
     const wormholeSpeedText = document.getElementById('wormhole-speed-text');
     const wormholeSendBtn = document.getElementById('wormhole-send-btn');
+ 
+    // --- Biometric Voice Mask Modal ---
+    const voiceMaskModal = document.getElementById('voice-mask-modal');
+    const closeVoiceMask = document.getElementById('close-voice-mask');
+    const audioSignalDot = document.getElementById('audio-signal-dot');
+    const voiceMonitorLabel = document.getElementById('voice-monitor-label');
+    const voiceTestMonitorBtn = document.getElementById('voice-test-monitor-btn');
+    const voiceTestIcon = document.getElementById('voice-test-icon');
+    const voiceTestText = document.getElementById('voice-test-text');
+    const voiceVisualizerCanvas = document.getElementById('voice-visualizer-canvas');
+    const voicePresetCards = document.querySelectorAll('.voice-preset-card');
+    const voiceModalToggleBtn = document.getElementById('voice-modal-toggle-btn');
+    const voiceModalToggleIcon = document.getElementById('voice-modal-toggle-icon');
+    const voiceModalToggleText = document.getElementById('voice-modal-toggle-text');
 
     const codeRunnerDrawer = document.getElementById('code-runner-drawer');
     const runnerModeBadge = document.getElementById('runner-mode-badge');
@@ -1053,7 +1070,686 @@ Everything you type is encrypted directly in your browser with AES-256 before le
 
     initWhiteboard();
 
-    // 10. --- WebRTC P2P Voice Walkie-Talkie ---
+    // 10. --- Biometric Anonymous Voice Changer & Walkie-Talkie ---
+    const VOICE_PRESETS = {
+        deep: { name: "Deep Anonymous", icon: "🤖", tag: "🤖 Deep", desc: "Sub-harmonic pitch shift + chest resonance. Witness protection filter." },
+        robot: { name: "Cyborg (Robotic)", icon: "👾", tag: "👾 Cyborg", desc: "Metallic ring modulation + comb resonance. Pure synthetic tone." },
+        high: { name: "Helium / Alien", icon: "🛸", tag: "🛸 Helium", desc: "High pitch shift (+7 semitones) + high-frequency formant shift." },
+        radio: { name: "Tactical Walkie-Talkie", icon: "📻", tag: "📻 Tactical", desc: "Military radio bandpass (450Hz-2.8kHz) + analog clipping overdrive." },
+        ghost: { name: "Ghost Entity", icon: "👻", tag: "👻 Ghost", desc: "Pitch drop + tremolo modulation & cavernous hollow delay." },
+        normal: { name: "Natural (Unmasked)", icon: "🎙️", tag: "🎙️ Natural", desc: "Clean original voice with standard echo cancellation." }
+    };
+
+    let activeVoiceMask = localStorage.getItem('quickpad_voice_mask') || 'deep';
+    if (!VOICE_PRESETS[activeVoiceMask]) activeVoiceMask = 'deep';
+
+    // Headphone sidetone monitor: hear your disguised voice in your headphones while broadcasting
+    let hearMyVoice = localStorage.getItem('quickpad_voice_hear_self') !== 'false'; // default TRUE
+    let isPushToTalkActive = false;
+
+    // Global remote voice audio context for multi-tab streaming playback
+    let remoteVoiceAudioCtx = null;
+    let remoteVoiceNextTime = 0;
+
+    function playRemoteVoiceChunk(chunkData) {
+        if (!chunkData || !chunkData.samples || chunkData.senderId === myDeviceId) return;
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!remoteVoiceAudioCtx) {
+                remoteVoiceAudioCtx = new AudioCtx();
+            }
+            if (remoteVoiceAudioCtx.state === 'suspended') {
+                remoteVoiceAudioCtx.resume();
+            }
+            const samples = chunkData.samples;
+            const sampleRate = chunkData.sampleRate || remoteVoiceAudioCtx.sampleRate || 44100;
+            const buffer = remoteVoiceAudioCtx.createBuffer(1, samples.length, sampleRate);
+            const channelData = buffer.getChannelData(0);
+            for (let i = 0; i < samples.length; i++) {
+                channelData[i] = samples[i] / 32768.0;
+            }
+            const src = remoteVoiceAudioCtx.createBufferSource();
+            src.buffer = buffer;
+            src.connect(remoteVoiceAudioCtx.destination);
+
+            const now = remoteVoiceAudioCtx.currentTime;
+            if (remoteVoiceNextTime < now) {
+                remoteVoiceNextTime = now + 0.02; // 20ms jitter buffer
+            }
+            src.start(remoteVoiceNextTime);
+            remoteVoiceNextTime += buffer.duration;
+
+            // Illuminate remote speaker avatar
+            const remoteBubble = document.querySelector(`.peer-avatar-bubble[data-cid="${chunkData.senderId}"]`);
+            if (remoteBubble) {
+                remoteBubble.classList.add('speaking');
+                clearTimeout(remoteBubble.__speakTimeout);
+                remoteBubble.__speakTimeout = setTimeout(() => remoteBubble.classList.remove('speaking'), 350);
+            }
+        } catch(e) {
+            console.warn("Remote voice playback error:", e);
+        }
+    }
+
+    function handleRemoteVoiceStop(data) {
+        if (!data || data.senderId === myDeviceId) return;
+        const remoteBubble = document.querySelector(`.peer-avatar-bubble[data-cid="${data.senderId}"]`);
+        if (remoteBubble) remoteBubble.classList.remove('speaking');
+    }
+
+    const VoiceMaskEngine = {
+        audioCtx: null,
+        micStream: null,
+        micSource: null,
+        currentDsp: null,
+        masterCompressor: null,
+        masterGain: null,
+        processedDest: null,
+        analyser: null,
+        monitorGain: null,
+        txGain: null,
+        processorNode: null,
+        isTransmitting: false,
+        visualizerRunning: false,
+        visualizerAnimId: null,
+
+        async initContext() {
+            if (!this.audioCtx) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                this.audioCtx = new AudioCtx();
+            }
+            if (this.audioCtx.state === 'suspended') {
+                await this.audioCtx.resume();
+            }
+            return this.audioCtx;
+        },
+
+        createPitchShifter(ctx, pitchRatio) {
+            if (Math.abs(pitchRatio - 1.0) < 0.02) {
+                const gain = ctx.createGain();
+                return { input: gain, output: gain, cleanup: () => {} };
+            }
+            const duration = 0.08;
+            const length = Math.floor(duration * ctx.sampleRate);
+            const modBuffer = ctx.createBuffer(4, length, ctx.sampleRate);
+            const d1 = modBuffer.getChannelData(0);
+            const d2 = modBuffer.getChannelData(1);
+            const g1 = modBuffer.getChannelData(2);
+            const g2 = modBuffer.getChannelData(3);
+            const maxDelay = 0.05;
+
+            for (let i = 0; i < length; i++) {
+                const p1 = i / length;
+                const p2 = (p1 + 0.5) % 1.0;
+                if (pitchRatio >= 1.0) {
+                    d1[i] = (1.0 - p1) * maxDelay * (pitchRatio - 1.0) / pitchRatio;
+                    d2[i] = (1.0 - p2) * maxDelay * (pitchRatio - 1.0) / pitchRatio;
+                } else {
+                    d1[i] = p1 * maxDelay * (1.0 - pitchRatio);
+                    d2[i] = p2 * maxDelay * (1.0 - pitchRatio);
+                }
+                g1[i] = 0.5 * (1 - Math.cos(2 * Math.PI * p1));
+                g2[i] = 0.5 * (1 - Math.cos(2 * Math.PI * p2));
+            }
+
+            const input = ctx.createGain();
+            const output = ctx.createGain();
+            const delay1 = ctx.createDelay(1.0);
+            const delay2 = ctx.createDelay(1.0);
+            delay1.delayTime.value = 0;
+            delay2.delayTime.value = 0;
+
+            const fade1 = ctx.createGain();
+            const fade2 = ctx.createGain();
+            fade1.gain.value = 0;
+            fade2.gain.value = 0;
+
+            const modSource = ctx.createBufferSource();
+            modSource.buffer = modBuffer;
+            modSource.loop = true;
+
+            const splitter = ctx.createChannelSplitter(4);
+            modSource.connect(splitter);
+
+            splitter.connect(delay1.delayTime, 0);
+            splitter.connect(delay2.delayTime, 1);
+            splitter.connect(fade1.gain, 2);
+            splitter.connect(fade2.gain, 3);
+
+            input.connect(delay1);
+            input.connect(delay2);
+            delay1.connect(fade1);
+            delay2.connect(fade2);
+            fade1.connect(output);
+            fade2.connect(output);
+
+            modSource.start();
+
+            return {
+                input,
+                output,
+                cleanup: () => {
+                    try { modSource.stop(); } catch(e) {}
+                    try { modSource.disconnect(); } catch(e) {}
+                    try { splitter.disconnect(); } catch(e) {}
+                    try { input.disconnect(); } catch(e) {}
+                    try { delay1.disconnect(); } catch(e) {}
+                    try { delay2.disconnect(); } catch(e) {}
+                    try { fade1.disconnect(); } catch(e) {}
+                    try { fade2.disconnect(); } catch(e) {}
+                }
+            };
+        },
+
+        createRingModulator(ctx, freq = 68) {
+            const input = ctx.createGain();
+            const output = ctx.createGain();
+            const ringGain = ctx.createGain();
+            ringGain.gain.value = 0;
+
+            const osc = ctx.createOscillator();
+            osc.frequency.value = freq;
+            osc.type = 'sine';
+            osc.connect(ringGain.gain);
+            osc.start();
+
+            input.connect(ringGain);
+            ringGain.connect(output);
+
+            return {
+                input,
+                output,
+                cleanup: () => {
+                    try { osc.stop(); } catch(e) {}
+                    try { osc.disconnect(); } catch(e) {}
+                    try { input.disconnect(); } catch(e) {}
+                    try { ringGain.disconnect(); } catch(e) {}
+                }
+            };
+        },
+
+        createDistortion(ctx, amount = 20) {
+            const waveShaper = ctx.createWaveShaper();
+            const n_samples = 44100;
+            const curve = new Float32Array(n_samples);
+            const deg = Math.PI / 180;
+            const k = typeof amount === 'number' ? amount : 20;
+            for (let i = 0; i < n_samples; ++i) {
+                const x = (i * 2) / n_samples - 1;
+                curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+            }
+            waveShaper.curve = curve;
+            waveShaper.oversample = '4x';
+            return waveShaper;
+        },
+
+        buildDsp(ctx, mode) {
+            const cleanups = [];
+            const input = ctx.createGain();
+            const output = ctx.createGain();
+
+            if (mode === 'deep') {
+                const ps = this.createPitchShifter(ctx, 0.74);
+                cleanups.push(ps.cleanup);
+
+                const makeup = ctx.createGain();
+                makeup.gain.value = 1.35;
+
+                const lowShelf = ctx.createBiquadFilter();
+                lowShelf.type = 'lowshelf';
+                lowShelf.frequency.value = 160;
+                lowShelf.gain.value = 6;
+
+                const midPeak = ctx.createBiquadFilter();
+                midPeak.type = 'peaking';
+                midPeak.frequency.value = 900;
+                midPeak.gain.value = 3;
+
+                const lowPass = ctx.createBiquadFilter();
+                lowPass.type = 'lowpass';
+                lowPass.frequency.value = 3200;
+
+                const dist = this.createDistortion(ctx, 10);
+
+                input.connect(ps.input);
+                ps.output.connect(makeup);
+                makeup.connect(lowShelf);
+                lowShelf.connect(midPeak);
+                midPeak.connect(lowPass);
+                lowPass.connect(dist);
+                dist.connect(output);
+
+            } else if (mode === 'robot') {
+                const ps = this.createPitchShifter(ctx, 0.88);
+                cleanups.push(ps.cleanup);
+
+                const rm = this.createRingModulator(ctx, 68);
+                cleanups.push(rm.cleanup);
+
+                // Compensate for carrier modulation amplitude loss
+                const makeup = ctx.createGain();
+                makeup.gain.value = 2.2;
+
+                const bp = ctx.createBiquadFilter();
+                bp.type = 'bandpass';
+                bp.frequency.value = 1800;
+                bp.Q.value = 0.8;
+
+                const peak = ctx.createBiquadFilter();
+                peak.type = 'peaking';
+                peak.frequency.value = 1600;
+                peak.gain.value = 5;
+
+                input.connect(ps.input);
+                ps.output.connect(rm.input);
+                rm.output.connect(makeup);
+                makeup.connect(bp);
+                bp.connect(peak);
+                peak.connect(output);
+
+            } else if (mode === 'high') {
+                const ps = this.createPitchShifter(ctx, 1.45);
+                cleanups.push(ps.cleanup);
+
+                const makeup = ctx.createGain();
+                makeup.gain.value = 1.3;
+
+                const hp = ctx.createBiquadFilter();
+                hp.type = 'highpass';
+                hp.frequency.value = 340;
+
+                const highShelf = ctx.createBiquadFilter();
+                highShelf.type = 'highshelf';
+                highShelf.frequency.value = 2200;
+                highShelf.gain.value = 5;
+
+                const lp = ctx.createBiquadFilter();
+                lp.type = 'lowpass';
+                lp.frequency.value = 6500;
+
+                input.connect(ps.input);
+                ps.output.connect(makeup);
+                makeup.connect(hp);
+                hp.connect(highShelf);
+                highShelf.connect(lp);
+                lp.connect(output);
+
+            } else if (mode === 'radio') {
+                const makeup = ctx.createGain();
+                makeup.gain.value = 1.5;
+
+                const hp = ctx.createBiquadFilter();
+                hp.type = 'highpass';
+                hp.frequency.value = 420;
+                hp.Q.value = 1.2;
+
+                const lp = ctx.createBiquadFilter();
+                lp.type = 'lowpass';
+                lp.frequency.value = 2700;
+                lp.Q.value = 1.4;
+
+                const peak = ctx.createBiquadFilter();
+                peak.type = 'peaking';
+                peak.frequency.value = 1400;
+                peak.gain.value = 6;
+
+                const dist = this.createDistortion(ctx, 24);
+
+                input.connect(makeup);
+                makeup.connect(hp);
+                hp.connect(lp);
+                lp.connect(peak);
+                peak.connect(dist);
+                dist.connect(output);
+
+            } else if (mode === 'ghost') {
+                const ps = this.createPitchShifter(ctx, 0.82);
+                cleanups.push(ps.cleanup);
+
+                const makeup = ctx.createGain();
+                makeup.gain.value = 1.3;
+
+                const tremoloGain = ctx.createGain();
+                tremoloGain.gain.value = 0.65;
+                const tremoloLfo = ctx.createOscillator();
+                tremoloLfo.frequency.value = 4.0;
+                const lfoDepth = ctx.createGain();
+                lfoDepth.gain.value = 0.35;
+                tremoloLfo.connect(lfoDepth);
+                lfoDepth.connect(tremoloGain.gain);
+                tremoloLfo.start();
+                cleanups.push(() => {
+                    try { tremoloLfo.stop(); tremoloLfo.disconnect(); } catch(e) {}
+                });
+
+                const delay = ctx.createDelay(1.0);
+                delay.delayTime.value = 0.16;
+                const feedback = ctx.createGain();
+                feedback.gain.value = 0.40;
+                const damp = ctx.createBiquadFilter();
+                damp.type = 'lowpass';
+                damp.frequency.value = 1800;
+
+                delay.connect(damp);
+                damp.connect(feedback);
+                feedback.connect(delay);
+
+                input.connect(ps.input);
+                ps.output.connect(makeup);
+                makeup.connect(tremoloGain);
+                tremoloGain.connect(output);
+                tremoloGain.connect(delay);
+                damp.connect(output);
+
+            } else {
+                // Normal
+                const hp = ctx.createBiquadFilter();
+                hp.type = 'highpass';
+                hp.frequency.value = 80;
+
+                input.connect(hp);
+                hp.connect(output);
+            }
+
+            return {
+                input,
+                output,
+                cleanup: () => cleanups.forEach(fn => { try { fn(); } catch(e) {} })
+            };
+        },
+
+        async startMic() {
+            // If mic stream is already warm and alive in memory, simply re-use it! Zero browser permission prompts!
+            if (this.micStream && this.micStream.active && this.micStream.getAudioTracks().some(t => t.readyState === 'live')) {
+                this.micStream.getAudioTracks().forEach(t => t.enabled = true);
+                if (this.audioCtx && this.audioCtx.state === 'suspended') {
+                    await this.audioCtx.resume();
+                }
+                this.startVisualizer();
+                return true;
+            }
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showToast("Microphone access requires HTTPS or localhost.", 'error');
+                return false;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: false
+                    }
+                });
+                this.micStream = stream;
+                localAudioStream = stream;
+
+                const ctx = await this.initContext();
+                this.micSource = ctx.createMediaStreamSource(stream);
+
+                // Master Dynamics Compressor for studio-level speech presence
+                this.masterCompressor = ctx.createDynamicsCompressor();
+                this.masterCompressor.threshold.value = -20;
+                this.masterCompressor.knee.value = 10;
+                this.masterCompressor.ratio.value = 5;
+                this.masterCompressor.attack.value = 0.003;
+                this.masterCompressor.release.value = 0.15;
+
+                // Master Makeup Gain
+                this.masterGain = ctx.createGain();
+                this.masterGain.gain.value = 1.4;
+                this.masterCompressor.connect(this.masterGain);
+
+                // Transmission Gain Node (0 when muted, 1.0 when transmitting)
+                this.txGain = ctx.createGain();
+                this.txGain.gain.value = 0;
+                this.masterGain.connect(this.txGain);
+
+                // WebRTC Destination for outgoing audio tracks
+                this.processedDest = ctx.createMediaStreamDestination();
+                this.txGain.connect(this.processedDest);
+
+                // ScriptProcessor for multi-tab BroadcastChannel audio streaming
+                if (ctx.createScriptProcessor) {
+                    this.processorNode = ctx.createScriptProcessor(2048, 1, 1);
+                    this.processorNode.onaudioprocess = (e) => {
+                        if (!this.isTransmitting) return;
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        let sumSquares = 0;
+                        const int16 = new Int16Array(inputData.length);
+                        for (let i = 0; i < inputData.length; i++) {
+                            const s = Math.max(-1, Math.min(1, inputData[i]));
+                            int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                            sumSquares += s * s;
+                        }
+                        const rms = Math.sqrt(sumSquares / inputData.length);
+                        if (rms > 0.003) {
+                            broadcastLocalSync({
+                                type: 'voice_audio_chunk',
+                                senderId: myDeviceId,
+                                senderName: myUsername,
+                                avatar: myAvatarUrl,
+                                sampleRate: ctx.sampleRate,
+                                samples: Array.from(int16)
+                            });
+                        }
+                    };
+                    this.txGain.connect(this.processorNode);
+                    this.processorNode.connect(ctx.destination);
+                }
+
+                // AnalyserNode for Visualizer Oscilloscope and Signal LED
+                this.analyser = ctx.createAnalyser();
+                this.analyser.fftSize = 256;
+                this.analyser.smoothingTimeConstant = 0.75;
+                this.masterGain.connect(this.analyser);
+
+                // Monitor Gain for Headphone Sidetone (hear your disguised voice)
+                this.monitorGain = ctx.createGain();
+                this.monitorGain.gain.value = 0;
+                this.monitorGain.connect(ctx.destination);
+                this.masterGain.connect(this.monitorGain);
+
+                // Build initial DSP graph
+                this.currentDsp = this.buildDsp(ctx, activeVoiceMask);
+                this.micSource.connect(this.currentDsp.input);
+                this.currentDsp.output.connect(this.masterCompressor);
+
+                this.startVisualizer();
+                return true;
+            } catch(err) {
+                console.error("Mic access error:", err);
+                showToast("Microphone permission denied. Check browser site permissions.", 'error');
+                return false;
+            }
+        },
+
+        setTransmitting(transmitting) {
+            this.isTransmitting = transmitting;
+            isVoiceTransmitting = transmitting;
+
+            if (this.audioCtx) {
+                const t = this.audioCtx.currentTime;
+                // Broadcast gain
+                if (this.txGain) {
+                    this.txGain.gain.setTargetAtTime(transmitting ? 1.0 : 0.0, t, 0.015);
+                }
+                // Headphone sidetone monitor: hear your disguised voice in your headphones
+                if (this.monitorGain) {
+                    const shouldHear = transmitting && hearMyVoice;
+                    this.monitorGain.gain.setTargetAtTime(shouldHear ? 1.0 : 0.0, t, 0.015);
+                }
+            }
+
+            // Mute or unmute hardware tracks WITHOUT stopping them (keeps stream persistent in RAM)
+            if (this.micStream) {
+                this.micStream.getAudioTracks().forEach(track => {
+                    track.enabled = transmitting;
+                });
+            }
+
+            if (!transmitting) {
+                broadcastLocalSync({
+                    type: 'voice_audio_stop',
+                    senderId: myDeviceId
+                });
+            }
+
+            if (audioSignalDot) {
+                audioSignalDot.classList.toggle('transmitting', transmitting);
+            }
+
+            const myBubble = document.querySelector('#profile-avatar-display');
+            if (myBubble) myBubble.classList.toggle('speaking', transmitting);
+        },
+
+        setMask(newMode) {
+            if (!VOICE_PRESETS[newMode]) return;
+            activeVoiceMask = newMode;
+            localStorage.setItem('quickpad_voice_mask', newMode);
+            this.updateUiPresetCards();
+
+            if (hudVoiceMaskTag) {
+                hudVoiceMaskTag.textContent = VOICE_PRESETS[newMode].tag;
+            }
+
+            if (!this.audioCtx || !this.micSource) return;
+
+            try {
+                if (this.currentDsp) {
+                    try { this.micSource.disconnect(this.currentDsp.input); } catch(e) {}
+                    try { this.currentDsp.output.disconnect(); } catch(e) {}
+                    if (this.currentDsp.cleanup) this.currentDsp.cleanup();
+                }
+
+                this.currentDsp = this.buildDsp(this.audioCtx, newMode);
+                this.micSource.connect(this.currentDsp.input);
+                if (this.masterCompressor) {
+                    this.currentDsp.output.connect(this.masterCompressor);
+                }
+            } catch(err) {
+                console.warn("Error switching voice mask DSP:", err);
+            }
+        },
+
+        updateUiPresetCards() {
+            if (voicePresetCards) {
+                voicePresetCards.forEach(card => {
+                    const m = card.getAttribute('data-mask');
+                    card.classList.toggle('active', m === activeVoiceMask);
+                });
+            }
+        },
+
+        toggleHearMyVoice() {
+            hearMyVoice = !hearMyVoice;
+            localStorage.setItem('quickpad_voice_hear_self', hearMyVoice ? 'true' : 'false');
+            this.updateSidetoneUi();
+
+            // Immediately apply to audio graph if actively broadcasting or testing
+            if (this.monitorGain && this.audioCtx) {
+                const shouldHear = this.isTransmitting && hearMyVoice;
+                this.monitorGain.gain.setTargetAtTime(shouldHear ? 1.0 : 0.0, this.audioCtx.currentTime, 0.015);
+            }
+
+            if (hearMyVoice) {
+                showToast("🎧 Headphone monitor ON: You will hear your masked voice as you speak", 'success');
+            } else {
+                showToast("🔇 Headphone monitor OFF (Silent sidetone)", 'info');
+            }
+        },
+
+        updateSidetoneUi() {
+            if (voiceTestText) {
+                voiceTestText.textContent = hearMyVoice ? 'Hear My Voice: ON' : 'Hear My Voice: OFF';
+            }
+            if (voiceTestMonitorBtn) {
+                voiceTestMonitorBtn.classList.toggle('testing', hearMyVoice);
+            }
+            if (voiceMonitorLabel) {
+                if (isVoiceActive) {
+                    voiceMonitorLabel.textContent = hearMyVoice ? '🎧 Broadcasting (Hear Mask ON)' : '🎙️ Broadcasting (Silent Sidetone)';
+                    voiceMonitorLabel.style.color = '#00ff66';
+                } else {
+                    voiceMonitorLabel.textContent = 'Mic Standby (Muted)';
+                    voiceMonitorLabel.style.color = '';
+                }
+            }
+        },
+
+        startVisualizer() {
+            if (this.visualizerRunning || !voiceVisualizerCanvas) return;
+            this.visualizerRunning = true;
+            const canvas = voiceVisualizerCanvas;
+            const ctx = canvas.getContext('2d');
+            const dataArray = new Uint8Array(this.analyser ? this.analyser.frequencyBinCount : 128);
+
+            const render = () => {
+                if (!this.visualizerRunning) return;
+                this.visualizerAnimId = requestAnimationFrame(render);
+
+                const width = canvas.width = canvas.parentElement ? canvas.parentElement.clientWidth : 300;
+                const height = canvas.height = 50;
+
+                ctx.fillStyle = 'rgba(5, 8, 16, 0.4)';
+                ctx.fillRect(0, 0, width, height);
+
+                if (this.analyser && this.micStream && this.isTransmitting) {
+                    this.analyser.getByteTimeDomainData(dataArray);
+
+                    let sum = 0;
+                    for (let i = 0; i < dataArray.length; i++) {
+                        const val = (dataArray[i] - 128) / 128;
+                        sum += val * val;
+                    }
+                    const rms = Math.sqrt(sum / dataArray.length);
+
+                    if (audioSignalDot) {
+                        audioSignalDot.classList.toggle('active', rms > 0.025);
+                    }
+
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = hearMyVoice ? '#00ff66' : '#00fff9';
+                    ctx.shadowColor = ctx.strokeStyle;
+                    ctx.shadowBlur = 8;
+                    ctx.beginPath();
+
+                    const sliceWidth = width / dataArray.length;
+                    let x = 0;
+
+                    for (let i = 0; i < dataArray.length; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = (v * height) / 2;
+                        if (i === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                        x += sliceWidth;
+                    }
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                } else {
+                    // Resting scanline
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeStyle = 'rgba(0, 255, 249, 0.25)';
+                    ctx.beginPath();
+                    ctx.moveTo(0, height / 2);
+                    ctx.lineTo(width, height / 2);
+                    ctx.stroke();
+                    if (audioSignalDot) audioSignalDot.classList.remove('active');
+                }
+            };
+            render();
+        },
+
+        stopVisualizer() {
+            this.visualizerRunning = false;
+            if (this.visualizerAnimId) {
+                cancelAnimationFrame(this.visualizerAnimId);
+                this.visualizerAnimId = null;
+            }
+        }
+    };
+
     async function toggleVoice() {
         if (isVoiceActive) {
             stopVoice();
@@ -1063,84 +1759,175 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     }
 
     async function startVoice() {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            showToast("Microphone access requires HTTPS or localhost.", 'error');
-            return;
+        // Resume AudioContext on user gesture
+        await VoiceMaskEngine.initContext();
+
+        // Warm up persistent mic stream (only requests browser permission once!)
+        const ok = await VoiceMaskEngine.startMic();
+        if (!ok) return;
+
+        isVoiceActive = true;
+        VoiceMaskEngine.setTransmitting(true);
+
+        if (hudVoiceBtn) {
+            hudVoiceBtn.classList.add('active', 'transmitting');
+            if (hudVoiceStatus) hudVoiceStatus.innerText = "Live (Masked)";
         }
-        try {
-            localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            // Mute by default for Push-to-Talk
-            localAudioStream.getAudioTracks().forEach(t => t.enabled = false);
-            isVoiceActive = true;
-            if (hudVoiceBtn) {
-                hudVoiceBtn.classList.add('active');
-                if (hudVoiceStatus) hudVoiceStatus.innerText = "Muted";
-            }
-            showToast("🎙️ Voice Active! Click/Hold or press Space to Talk.", 'success');
-        } catch(e) {
-            showToast("Microphone permission denied.", 'error');
+        if (voiceModalToggleBtn) {
+            voiceModalToggleBtn.classList.add('active');
+            if (voiceModalToggleIcon) voiceModalToggleIcon.textContent = '🔴';
+            if (voiceModalToggleText) voiceModalToggleText.textContent = 'Stop Voice Broadcast';
         }
+        VoiceMaskEngine.updateSidetoneUi();
+
+        showToast(`🎙️ Voice Live (${VOICE_PRESETS[activeVoiceMask].name})! Speak into your mic.`, 'success');
     }
 
     function stopVoice() {
-        if (localAudioStream) {
-            localAudioStream.getTracks().forEach(t => t.stop());
-            localAudioStream = null;
-        }
         isVoiceActive = false;
-        isVoiceTransmitting = false;
+        VoiceMaskEngine.setTransmitting(false);
+
         if (hudVoiceBtn) {
             hudVoiceBtn.classList.remove('active', 'transmitting');
             if (hudVoiceStatus) hudVoiceStatus.innerText = "Voice";
         }
+        if (voiceModalToggleBtn) {
+            voiceModalToggleBtn.classList.remove('active');
+            if (voiceModalToggleIcon) voiceModalToggleIcon.textContent = '🎙️';
+            if (voiceModalToggleText) voiceModalToggleText.textContent = 'Start Live Voice Broadcast';
+        }
+        VoiceMaskEngine.updateSidetoneUi();
+
         const myBubble = document.querySelector('#profile-avatar-display');
         if (myBubble) myBubble.classList.remove('speaking');
-        showToast("Voice chat disconnected", 'info');
+        showToast("Voice broadcast stopped (Muted)", 'info');
     }
 
-    function setPushToTalk(transmitting) {
-        if (!isVoiceActive || !localAudioStream) return;
-        isVoiceTransmitting = transmitting;
-        localAudioStream.getAudioTracks().forEach(t => t.enabled = transmitting);
-        if (hudVoiceBtn) {
-            if (transmitting) {
-                hudVoiceBtn.classList.add('transmitting');
-                if (hudVoiceStatus) hudVoiceStatus.innerText = "Transmitting...";
-            } else {
-                hudVoiceBtn.classList.remove('transmitting');
-                if (hudVoiceStatus) hudVoiceStatus.innerText = "Muted";
-            }
+    function openVoiceMaskModal() {
+        if (!voiceMaskModal) return;
+        voiceMaskModal.classList.remove('hidden');
+        VoiceMaskEngine.updateUiPresetCards();
+        VoiceMaskEngine.updateSidetoneUi();
+        if (!VoiceMaskEngine.visualizerRunning) {
+            VoiceMaskEngine.startVisualizer();
         }
-        const myBubble = document.querySelector('#profile-avatar-display');
-        if (myBubble) myBubble.classList.toggle('speaking', transmitting);
     }
 
+    function closeVoiceMaskModal() {
+        if (!voiceMaskModal) return;
+        voiceMaskModal.classList.add('hidden');
+        // If not actively broadcasting, stop visualizer loop to save battery
+        if (!isVoiceActive) {
+            VoiceMaskEngine.stopVisualizer();
+        }
+    }
+
+    // Single unified click handler for HUD voice button (no mousedown/mouseup collision!)
     if (hudVoiceBtn) {
         hudVoiceBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleVoice();
         });
-        hudVoiceBtn.addEventListener('mousedown', () => isVoiceActive && setPushToTalk(true));
-        hudVoiceBtn.addEventListener('mouseup', () => isVoiceActive && setPushToTalk(false));
-        hudVoiceBtn.addEventListener('touchstart', (e) => {
-            if (isVoiceActive) { e.preventDefault(); setPushToTalk(true); }
-        }, { passive: false });
-        hudVoiceBtn.addEventListener('touchend', (e) => {
-            if (isVoiceActive) { e.preventDefault(); setPushToTalk(false); }
-        }, { passive: false });
+        hudVoiceBtn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            openVoiceMaskModal();
+        });
     }
 
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && isVoiceActive && document.activeElement !== editor && !isVoiceTransmitting) {
-            e.preventDefault();
-            setPushToTalk(true);
+    if (hudVoiceMaskBtn) {
+        hudVoiceMaskBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openVoiceMaskModal();
+        });
+    }
+
+    if (hudVoiceMaskToolBtn) {
+        hudVoiceMaskToolBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const toolsMenu = document.getElementById('hud-tools-menu');
+            if (toolsMenu) toolsMenu.classList.add('hidden');
+            openVoiceMaskModal();
+        });
+    }
+
+    if (voiceTestMonitorBtn) {
+        voiceTestMonitorBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            // If mic not active yet, initialize it so user can test immediately
+            if (!VoiceMaskEngine.micStream) {
+                const ok = await VoiceMaskEngine.startMic();
+                if (!ok) return;
+                // Temporarily transmit for testing
+                VoiceMaskEngine.setTransmitting(true);
+            }
+            VoiceMaskEngine.toggleHearMyVoice();
+        });
+    }
+
+    if (voiceModalToggleBtn) {
+        voiceModalToggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleVoice();
+        });
+    }
+
+    if (voicePresetCards) {
+        voicePresetCards.forEach(card => {
+            card.addEventListener('click', () => {
+                const mask = card.getAttribute('data-mask');
+                if (mask) {
+                    VoiceMaskEngine.setMask(mask);
+                    showToast(`🎭 Voice disguise changed to: ${VOICE_PRESETS[mask].name}`, 'info');
+                }
+            });
+        });
+    }
+
+    // Push-to-Talk via Spacebar (active when in Muted mode)
+    window.addEventListener('keydown', async (e) => {
+        if (e.code === 'Space' && !isVoiceActive && !isPushToTalkActive) {
+            const tag = document.activeElement ? document.activeElement.tagName : '';
+            const isTypingField = ['INPUT', 'TEXTAREA'].includes(tag) || (document.activeElement && document.activeElement.isContentEditable);
+            if (!isTypingField) {
+                e.preventDefault();
+                await VoiceMaskEngine.initContext();
+                const ok = await VoiceMaskEngine.startMic();
+                if (ok) {
+                    isPushToTalkActive = true;
+                    VoiceMaskEngine.setTransmitting(true);
+                    if (hudVoiceBtn) {
+                        hudVoiceBtn.classList.add('active', 'transmitting');
+                        if (hudVoiceStatus) hudVoiceStatus.innerText = "Transmitting...";
+                    }
+                }
+            }
         }
     });
+
     window.addEventListener('keyup', (e) => {
-        if (e.code === 'Space' && isVoiceActive && document.activeElement !== editor) {
-            setPushToTalk(false);
+        if (e.code === 'Space' && isPushToTalkActive) {
+            isPushToTalkActive = false;
+            VoiceMaskEngine.setTransmitting(false);
+            if (hudVoiceBtn) {
+                hudVoiceBtn.classList.remove('active', 'transmitting');
+                if (hudVoiceStatus) hudVoiceStatus.innerText = "Voice";
+            }
         }
     });
+
+    // Resume AudioContexts on any pointer click anywhere on the page
+    document.addEventListener('pointerdown', () => {
+        if (VoiceMaskEngine.audioCtx && VoiceMaskEngine.audioCtx.state === 'suspended') {
+            VoiceMaskEngine.audioCtx.resume();
+        }
+        if (remoteVoiceAudioCtx && remoteVoiceAudioCtx.state === 'suspended') {
+            remoteVoiceAudioCtx.resume();
+        }
+    }, { passive: true });
+
+    if (hudVoiceMaskTag && VOICE_PRESETS[activeVoiceMask]) {
+        hudVoiceMaskTag.textContent = VOICE_PRESETS[activeVoiceMask].tag;
+    }
 
     // 10.5 --- Private On-Device Speech Dictation ---
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -2126,9 +2913,34 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     }
                 } else if (data.type === 'cursor_presence') {
                     if (data.cursor) {
-                        peerCursorsData[data.senderId] = data.cursor;
+                        const isNewPeer = !peerCursorsData[data.senderId];
+                        peerCursorsData[data.senderId] = {
+                            pos: data.cursor.pos,
+                            name: data.cursor.name,
+                            pubKey: data.cursor.pubKey,
+                            tabId: data.cursor.tabId,
+                            avatar: data.cursor.avatar,
+                            speaking: !!data.cursor.speaking,
+                            timestamp: data.cursor.timestamp || Date.now(),
+                            isLocalTab: true
+                        };
                         if (data.cursor.tabId === activeTabId) {
                             renderPeerCursor(data.senderId, data.cursor.pos, data.cursor.name);
+                        }
+                        if (typeof updatePresenceUI === 'function') {
+                            updatePresenceUI();
+                        }
+                        // Reciprocate presence immediately to newly discovered peer so both tabs show 2 Online
+                        if (isNewPeer && typeof syncMyCursor === 'function') {
+                            syncMyCursor();
+                        }
+                    }
+                } else if (data.type === 'peer_disconnect') {
+                    if (data.senderId) {
+                        removePeerCursor(data.senderId);
+                        delete peerCursorsData[data.senderId];
+                        if (typeof updatePresenceUI === 'function') {
+                            updatePresenceUI();
                         }
                     }
                 } else if (data.type === 'laser_presence') {
@@ -2152,6 +2964,23 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     if (data.stroke && data.tabId === activeTabId) {
                         drawRemoteStrokeBatch(data.stroke);
                     }
+                } else if (data.type === 'voice_audio_chunk') {
+                    if (data.samples && typeof playRemoteVoiceChunk === 'function') {
+                        playRemoteVoiceChunk(data);
+                    }
+                } else if (data.type === 'voice_audio_stop') {
+                    if (typeof handleRemoteVoiceStop === 'function') {
+                        handleRemoteVoiceStop(data);
+                    }
+                } else if (data.type === 'dm_message') {
+                    if (data.chatKey && data.dmObj) {
+                        if (!globalDms[data.chatKey]) globalDms[data.chatKey] = [];
+                        if (!globalDms[data.chatKey].some(m => m.id === data.dmObj.id)) {
+                            globalDms[data.chatKey].push(data.dmObj);
+                            if (typeof calculateUnread === 'function') calculateUnread(globalDms);
+                            if (typeof renderChat === 'function') renderChat();
+                        }
+                    }
                 } else if (data.type === 'request_initial_sync') {
                     if (tabsData && Object.keys(tabsData).length > 0) {
                         broadcastLocalSync({
@@ -2160,17 +2989,24 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             senderId: myDeviceId
                         });
                     }
+                    if (typeof syncMyCursor === 'function') {
+                        syncMyCursor();
+                    }
                 }
                 } catch(err) {
                     window.__lastLocalSyncError = err.message + '\n' + err.stack;
                 }
             };
 
-            // Request initial sync from any open tab on this device
+            // Request initial sync and announce presence to all open tabs on this device
             broadcastLocalSync({
                 type: 'request_initial_sync',
                 senderId: myDeviceId
             });
+            setTimeout(() => {
+                if (typeof syncMyCursor === 'function') syncMyCursor();
+                if (typeof updatePresenceUI === 'function') updatePresenceUI();
+            }, 50);
         } catch (e) {
             console.warn("BroadcastChannel initialization warning:", e);
         }
@@ -2185,12 +3021,142 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         } catch(e) {}
     }
 
+    // --- Unified Presence UI Engine (Keeps Online Badges & Collaborator Bubbles in 100% Real-Time Sync) ---
+    function updatePresenceUI() {
+        const activeUsers = new Map();
+        activeUsers.set(myDeviceId, { name: myUsername, avatar: myAvatarUrl, speaking: isVoiceTransmitting });
+
+        const now = Date.now();
+        for (let cid in peerCursorsData) {
+            if (cid === myDeviceId) continue;
+            const c = peerCursorsData[cid];
+            if (!c) continue;
+            // Prune if inactive for more than 35 seconds
+            if (c.timestamp && (now - c.timestamp > 35000)) {
+                removePeerCursor(cid);
+                delete peerCursorsData[cid];
+                continue;
+            }
+            activeUsers.set(cid, {
+                name: c.name || 'Anon',
+                avatar: c.avatar || '',
+                speaking: !!c.speaking,
+                pubKey: c.pubKey
+            });
+        }
+
+        // Prune disconnected peers from remote lasers
+        for (let cid in remoteLasers) {
+            if (!activeUsers.has(cid)) {
+                delete remoteLasers[cid];
+            }
+        }
+
+        // Save global active users map
+        currentActiveUsers = activeUsers;
+        if (typeof updateWormholePeersUI === 'function') {
+            updateWormholePeersUI();
+        }
+
+        // Update Presence Header / Bottom Bar UI on both tabs
+        const totalCount = activeUsers.size;
+        if (onlineCountText) {
+            onlineCountText.innerText = totalCount === 1 ? '1 Online' : `${totalCount} Online`;
+        }
+
+        let totalUnread = 0;
+        for (let cid in unreadMessages) {
+            totalUnread += (unreadMessages[cid] || 0);
+        }
+        if (onlineCountBadge) {
+            onlineCountBadge.classList.toggle('has-unread-dms', totalUnread > 0);
+        }
+
+        if (peerAvatarsList) {
+            let peersHtml = '';
+            activeUsers.forEach((user, cid) => {
+                if (cid === myDeviceId) return;
+                let avatarContent = '👤';
+                if (user.avatar && (user.avatar.startsWith('http://') || user.avatar.startsWith('https://') || user.avatar.startsWith('data:'))) {
+                    avatarContent = `<img src="${escapeHtml(user.avatar)}" alt="${escapeHtml(user.name)}" onerror="this.parentNode.innerText='👤'">`;
+                } else if (user.avatar) {
+                    avatarContent = escapeHtml(user.avatar);
+                }
+                const colorObj = getPeerColor(cid);
+                const unreadCount = unreadMessages[cid] || 0;
+                const unread = unreadCount > 0 ? `<span class="peer-unread-dot" title="${unreadCount} new message${unreadCount > 1 ? 's' : ''}"></span>` : '';
+                const speakingClass = user.speaking ? ' speaking' : '';
+
+                peersHtml += `
+                    <div class="peer-avatar-wrapper" data-cid="${escapeHtml(cid)}" data-name="${escapeHtml(user.name)}" title="${escapeHtml(user.name)} (Click to DM)">
+                        <div class="peer-avatar-bubble${speakingClass}" style="border-color:${colorObj.color}">
+                            ${avatarContent}
+                        </div>
+                        ${unread}
+                        <div class="peer-tooltip">
+                            <span class="peer-tooltip-name" style="color:${colorObj.color}">${escapeHtml(user.name)}</span>
+                            <span class="peer-tooltip-action" style="${unreadCount > 0 ? 'color:#ff0055;font-weight:700;' : ''}">${unreadCount > 0 ? `💬 ${unreadCount} new message${unreadCount > 1 ? 's' : ''}` : (user.speaking ? '🔊 Speaking...' : '💬 Click to DM')}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            peerAvatarsList.innerHTML = peersHtml;
+
+            // Attach chat & DM listeners
+            peerAvatarsList.querySelectorAll('.peer-avatar-wrapper').forEach(wrap => {
+                const cid = wrap.getAttribute('data-cid');
+                const name = wrap.getAttribute('data-name');
+                const triggerChat = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.openChat(cid, name);
+                };
+                wrap.addEventListener('click', triggerChat);
+                wrap.addEventListener('touchend', triggerChat);
+            });
+        }
+    }
+
+    // Announce departure on tab close
+    window.addEventListener('beforeunload', () => {
+        broadcastLocalSync({
+            type: 'peer_disconnect',
+            senderId: myDeviceId
+        });
+        if (db && currentToken && !isBurnMode) {
+            try {
+                const delPayload = {};
+                if (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldValue) {
+                    delPayload[`cursors.${myDeviceId}`] = firebase.firestore.FieldValue.delete();
+                    db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
+                }
+            } catch(e) {}
+        }
+    });
+
+    // Heartbeat to keep collaborator presence in sync across tabs and cloud
+    setInterval(() => {
+        if (typeof syncMyCursor === 'function') {
+            syncMyCursor();
+        }
+        if (typeof updatePresenceUI === 'function') {
+            updatePresenceUI();
+        }
+    }, 4000);
+
     // --- Real-Time Firestore Synchronization ---
     let lastSeenServerTimestamp = 0;
     function setupRealtimeSync(token) {
         if (!db) return;
         if (unsubscribeWorkspace) unsubscribeWorkspace();
         initStrokesListener();
+
+        // Immediately announce presence to Firestore upon room connection
+        setTimeout(() => {
+            if (typeof syncMyCursor === 'function') {
+                syncMyCursor(true);
+            }
+        }, 80);
         
         try {
             unsubscribeWorkspace = db.collection("workspaces").doc(token).onSnapshot((docSnap) => {
@@ -2203,21 +3169,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             lastSeenServerTimestamp = Math.max(lastSeenServerTimestamp, data.updated_at);
                         }
 
-                        // If snapshot is an echo of this tab's own recent write, update baseline & skip clobbering
-                        if (data.last_writer === myDeviceId) {
-                            if (data.tabs) {
-                                for (let tid in data.tabs) {
-                                    let content = data.tabs[tid].content || '';
-                                    if (vaultPassword && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
-                                        try {
-                                            const dec = CryptoJS.AES.decrypt(content, vaultPassword).toString(CryptoJS.enc.Utf8);
-                                            if (dec) content = dec;
-                                        } catch(e) {}
-                                    }
-                                    lastSyncedServerTabs[tid] = { content: content };
+                        // If snapshot is an echo of this tab's own recent write, update baseline & skip clobbering editor
+                        const isSelfWriter = (data.last_writer === myDeviceId);
+                        if (isSelfWriter && data.tabs) {
+                            for (let tid in data.tabs) {
+                                let content = data.tabs[tid].content || '';
+                                if (vaultPassword && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                                    try {
+                                        const dec = CryptoJS.AES.decrypt(content, vaultPassword).toString(CryptoJS.enc.Utf8);
+                                        if (dec) content = dec;
+                                    } catch(e) {}
                                 }
+                                lastSyncedServerTabs[tid] = { content: content };
                             }
-                            return;
                         }
                     
                         // Check if burned or expired
@@ -2260,8 +3224,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             }
                         }
 
-                        // Synchronize workspace tabs if tabs or legacy content are present in the snapshot
-                        if (data.tabs || data.content) {
+                        // Synchronize workspace tabs if tabs or legacy content are present in the snapshot (skip if self writer to avoid clobbering editor)
+                        if (!isSelfWriter && (data.tabs || data.content)) {
                             let serverTabs = data.tabs || {};
                             if (data.content && !data.tabs) serverTabs = { 'main': { name: 'main.txt', content: data.content, is_encrypted: data.is_encrypted } };
                             
@@ -2459,24 +3423,40 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
                         if (data.cursors) {
                             let activeUsers = new Map();
-                            activeUsers.set(myDeviceId, { name: myUsername, avatar: myAvatarUrl });
+                            activeUsers.set(myDeviceId, { name: myUsername, avatar: myAvatarUrl, speaking: isVoiceTransmitting });
                             
+                            const now = Date.now();
                             for (let cid in data.cursors) {
                                 if (cid === myDeviceId) continue;
                                 let c = data.cursors[cid];
-                                if (c.timestamp && (Date.now() - c.timestamp > 15000)) {
+                                if (!c) continue;
+                                if (c.timestamp && (now - c.timestamp > 35000)) {
                                     removePeerCursor(cid);
                                     delete peerCursorsData[cid];
                                     continue;
                                 }
-                                peerCursorsData[cid] = { pos: c.pos, name: c.name, pubKey: c.pubKey, tabId: c.tabId, avatar: c.avatar, speaking: !!c.speaking };
-                                activeUsers.set(cid, { name: c.name || 'Anon', avatar: c.avatar || '', speaking: !!c.speaking });
+                                const isNewPeer = !peerCursorsData[cid];
+                                peerCursorsData[cid] = {
+                                    pos: typeof c.pos === 'number' ? c.pos : 0,
+                                    name: c.name || 'Anon',
+                                    pubKey: c.pubKey || null,
+                                    tabId: c.tabId || 'main',
+                                    avatar: c.avatar || '',
+                                    speaking: !!c.speaking,
+                                    timestamp: c.timestamp || now
+                                };
+                                activeUsers.set(cid, {
+                                    name: c.name || 'Anon',
+                                    avatar: c.avatar || '',
+                                    speaking: !!c.speaking,
+                                    pubKey: c.pubKey || null
+                                });
                                 
                                 if (c.tabId === activeTabId) renderPeerCursor(cid, c.pos, c.name);
                                 else removePeerCursor(cid);
 
                                 // Check remote cursor emoji flare
-                                if (c.flare && c.flare.timestamp && (Date.now() - c.flare.timestamp < 3500)) {
+                                if (c.flare && c.flare.timestamp && (now - c.flare.timestamp < 3500)) {
                                     if (!peerCursorsData[cid].lastFlareTime || peerCursorsData[cid].lastFlareTime !== c.flare.timestamp) {
                                         spawnFlareParticle(c.pos, c.flare.emoji, false, getCaretCoordinates(c.pos));
                                         peerCursorsData[cid].lastFlareTime = c.flare.timestamp;
@@ -2484,7 +3464,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
 
                                 // v3.0 Check remote collaborator laser pointer & trail
-                                if (c.laser && c.laser.active && (Date.now() - c.laser.timestamp < 10000)) {
+                                if (c.laser && c.laser.active && (now - c.laser.timestamp < 10000)) {
                                     const rx = typeof c.laser.x === 'number' ? c.laser.x : null;
                                     const ry = typeof c.laser.y === 'number' ? c.laser.y : null;
                                     if (rx !== null && ry !== null) {
@@ -2499,7 +3479,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                                 name: c.laser.name || c.name || 'Collaborator',
                                                 active: true,
                                                 opacity: 1,
-                                                lastUpdate: Date.now()
+                                                lastUpdate: now
                                             };
                                         } else {
                                             const rl = remoteLasers[cid];
@@ -2509,9 +3489,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                             rl.name = c.laser.name || c.name || rl.name;
                                             rl.active = true;
                                             rl.opacity = 1;
-                                            rl.lastUpdate = Date.now();
+                                            rl.lastUpdate = now;
                                             if (Math.hypot(rx - rl.x, ry - rl.y) > 2) {
-                                                rl.trail.push({ x: rx, y: ry, time: Date.now() });
+                                                rl.trail.push({ x: rx, y: ry, time: now });
                                                 if (rl.trail.length > 25) rl.trail.shift();
                                             }
                                         }
@@ -2519,65 +3499,37 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 } else {
                                     delete remoteLasers[cid];
                                 }
-                            }
 
-                            // Prune disconnected peers from remote lasers
-                            for (let cid in remoteLasers) {
-                                if (!activeUsers.has(cid)) {
-                                    delete remoteLasers[cid];
+                                // Reciprocate presence if a new peer is discovered so both sides synchronize instantly
+                                if (isNewPeer && typeof syncMyCursor === 'function') {
+                                    syncMyCursor(true);
                                 }
                             }
-                            
-                            // Save global active users map
-                            currentActiveUsers = activeUsers;
-                            updateWormholePeersUI();
 
-                            // Update Presence Header UI
-                            const totalCount = activeUsers.size;
-                            if (onlineCountText) {
-                                onlineCountText.innerText = totalCount === 1 ? '1 Online' : `${totalCount} Online`;
+                            // Prune peers that were removed from Firestore (unless connected as local tab)
+                            for (let existingCid in peerCursorsData) {
+                                if (existingCid === myDeviceId) continue;
+                                if (!data.cursors[existingCid] && !peerCursorsData[existingCid].isLocalTab) {
+                                    removePeerCursor(existingCid);
+                                    delete peerCursorsData[existingCid];
+                                }
                             }
-                            if (peerAvatarsList) {
-                                let peersHtml = '';
-                                activeUsers.forEach((user, cid) => {
-                                    if (cid === myDeviceId) return;
-                                    let avatarContent = '👤';
-                                    if (user.avatar && (user.avatar.startsWith('http://') || user.avatar.startsWith('https://') || user.avatar.startsWith('data:'))) {
-                                        avatarContent = `<img src="${escapeHtml(user.avatar)}" alt="${escapeHtml(user.name)}" onerror="this.parentNode.innerText='👤'">`;
-                                    } else if (user.avatar) {
-                                        avatarContent = escapeHtml(user.avatar);
-                                    }
-                                    const colorObj = getPeerColor(cid);
-                                    const unread = unreadMessages[cid] ? `<span class="glowing-dot" style="position:absolute;top:-2px;right:-2px;"></span>` : '';
-                                    const speakingClass = user.speaking ? ' speaking' : '';
-                                    
-                                    peersHtml += `
-                                        <div class="peer-avatar-wrapper" data-cid="${escapeHtml(cid)}" data-name="${escapeHtml(user.name)}" title="${escapeHtml(user.name)} (Click to DM)">
-                                            <div class="peer-avatar-bubble${speakingClass}" style="border-color:${colorObj.color}">
-                                                ${avatarContent}
-                                                ${unread}
-                                            </div>
-                                            <div class="peer-tooltip">
-                                                <span class="peer-tooltip-name" style="color:${colorObj.color}">${escapeHtml(user.name)}</span>
-                                                <span class="peer-tooltip-action">${user.speaking ? '🔊 Speaking...' : '💬 Click to DM'}</span>
-                                            </div>
-                                        </div>
-                                    `;
-                                });
-                                peerAvatarsList.innerHTML = peersHtml;
 
-                                // Attach resilient click & touch listeners to each peer avatar wrapper
-                                peerAvatarsList.querySelectorAll('.peer-avatar-wrapper').forEach(wrap => {
-                                    const cid = wrap.getAttribute('data-cid');
-                                    const name = wrap.getAttribute('data-name');
-                                    const triggerChat = (e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        window.openChat(cid, name);
-                                    };
-                                    wrap.addEventListener('click', triggerChat);
-                                    wrap.addEventListener('touchend', triggerChat);
-                                });
+                            // Update presence UI
+                            if (typeof updatePresenceUI === 'function') {
+                                updatePresenceUI();
+                            }
+                        } else {
+                            // If data.cursors is null/missing, clean up non-local peers
+                            for (let existingCid in peerCursorsData) {
+                                if (existingCid === myDeviceId) continue;
+                                if (!peerCursorsData[existingCid].isLocalTab) {
+                                    removePeerCursor(existingCid);
+                                    delete peerCursorsData[existingCid];
+                                }
+                            }
+                            if (typeof updatePresenceUI === 'function') {
+                                updatePresenceUI();
                             }
                         }
                     } else {
@@ -2856,25 +3808,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             const payload = {
                 is_encrypted: !!vaultPassword,
                 updated_at: Date.now(),
-                last_writer: myDeviceId,
-                cursors: {
-                    [myDeviceId]: {
-                        pos: editor.selectionStart || 0,
-                        name: myUsername,
-                        avatar: myAvatarUrl,
-                        tabId: activeTabId,
-                        timestamp: Date.now(),
-                        pubKey: myPublicKeyJwk,
-                        laser: (isLaserActive && localLaser.visible && localLaser.inBounds && localLaser.x !== null) ? {
-                            active: true,
-                            x: Math.round(localLaser.x),
-                            y: Math.round(localLaser.y),
-                            color: getPeerColor(myDeviceId).color,
-                            name: myUsername || 'Collaborator',
-                            timestamp: Date.now()
-                        } : null
-                    }
-                }
+                last_writer: myDeviceId
             };
 
             if (Object.keys(workspacePolls).length > 0) {
@@ -3039,7 +3973,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     }
 
     let cursorBroadcastTimeout = null;
-    function syncMyCursor() {
+    function syncMyCursor(forceCloud = false) {
         if (!currentToken || isBurnMode || isReadOnly) return;
         
         const cursorData = {
@@ -3074,29 +4008,45 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             cursor: cursorData
         });
 
-        // For Firestore cloud broadcast: throttle to at least 3 seconds,
-        // only if remote peers are active, and never write if quota is exceeded
+        // For Firestore cloud broadcast:
         if (!db || isCloudQuotaExceeded) return;
         const now = Date.now();
-        if (now - lastFirestoreCursorSync < 3000) {
-            if (!cursorBroadcastTimeout) {
+        const hasRemotePeers = Object.keys(peerCursorsData).length > 0;
+        
+        // Throttling:
+        // - Remote peers active: throttle cursor updates to once every 3.5 seconds
+        // - Alone in room: heartbeat update every 12 seconds to keep presence alive in document
+        const minInterval = hasRemotePeers ? 3500 : 12000;
+        const elapsed = now - lastFirestoreCursorSync;
+
+        if (!forceCloud && elapsed < minInterval) {
+            if (!cursorBroadcastTimeout && hasRemotePeers) {
                 cursorBroadcastTimeout = setTimeout(() => {
                     cursorBroadcastTimeout = null;
                     syncMyCursor();
-                }, 3000 - (now - lastFirestoreCursorSync));
+                }, minInterval - elapsed);
             }
             return;
         }
-        lastFirestoreCursorSync = now;
-        clearTimeout(cursorBroadcastTimeout);
-        cursorBroadcastTimeout = null;
 
-        // Skip cloud write if no remote peers are in the workspace
-        if (Object.keys(peerCursorsData).length === 0) return;
+        lastFirestoreCursorSync = now;
+        if (cursorBroadcastTimeout) {
+            clearTimeout(cursorBroadcastTimeout);
+            cursorBroadcastTimeout = null;
+        }
 
         const updatePayload = {};
         updatePayload[`cursors.${myDeviceId}`] = cursorData;
-        db.collection("workspaces").doc(currentToken).update(updatePayload).catch(() => {});
+        db.collection("workspaces").doc(currentToken).update(updatePayload).catch(err => {
+            // Fallback to set with merge if document or field structure needs initialization
+            if (currentToken && !isBurnMode) {
+                db.collection("workspaces").doc(currentToken).set({
+                    cursors: {
+                        [myDeviceId]: cursorData
+                    }
+                }, { merge: true }).catch(() => {});
+            }
+        });
     }
 
     function updateHUD() {
@@ -3650,13 +4600,16 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     }
 
     // --- Universal Modal Backdrop & Escape Dismissal ---
-    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal, privacyInspectorModal, cardExportModal];
+    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal, privacyInspectorModal, cardExportModal, voiceMaskModal];
 
     allModals.forEach(modal => {
         if (!modal) return;
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
                 modal.classList.add('hidden');
+                if (modal === voiceMaskModal && typeof closeVoiceMaskModal === 'function') {
+                    closeVoiceMaskModal();
+                }
                 if (modal === customDialogModal && customDialogResolve) {
                     customDialogResolve(null);
                     customDialogResolve = null;
@@ -3670,10 +4623,12 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     if (closeProfile) closeProfile.addEventListener('click', () => profileModal && profileModal.classList.add('hidden'));
     if (closeCollaborators) closeCollaborators.addEventListener('click', () => collaboratorsModal && collaboratorsModal.classList.add('hidden'));
     if (closeCardModal) closeCardModal.addEventListener('click', () => cardExportModal && cardExportModal.classList.add('hidden'));
+    if (closeVoiceMask) closeVoiceMask.addEventListener('click', () => { if (typeof closeVoiceMaskModal === 'function') closeVoiceMaskModal(); });
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             allModals.forEach(m => m && m.classList.add('hidden'));
+            if (typeof closeVoiceMaskModal === 'function') closeVoiceMaskModal();
             if (findReplaceBar) findReplaceBar.classList.add('hidden');
             if (document.body.classList.contains('zen-mode')) document.body.classList.remove('zen-mode');
             if (document.body.classList.contains('spotlight-active')) togglePresenterSpotlight();
@@ -3931,12 +4886,51 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         } catch (e) { return "[Decryption Failed]"; }
     }
 
+    function playMessageNotificationSound() {
+        try {
+            const ctx = getAudioContext();
+            if (!ctx) return;
+            const now = ctx.currentTime;
+
+            // Tone 1: Crisp pleasant chime at 880Hz (A5)
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(880, now);
+            gain1.gain.setValueAtTime(0.2, now);
+            gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.16);
+
+            // Tone 2: Ascending harmonious chime at 1318.5Hz (E6)
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1318.5, now + 0.08);
+            gain2.gain.setValueAtTime(0, now);
+            gain2.gain.setValueAtTime(0.25, now + 0.08);
+            gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.start(now + 0.08);
+            osc2.stop(now + 0.32);
+        } catch(e) {}
+    }
+
     window.openChat = function(cid, name) {
         if (!window.crypto || !window.crypto.subtle) {
             showToast("Peer DMs require HTTPS or Localhost for RSA encryption.", 'error');
             return;
         }
-        activeChatId = cid; 
+        activeChatId = cid;
+        unreadMessages[cid] = 0;
+        const chatKey = [myDeviceId, activeChatId].sort().join('_');
+        const msgs = (globalDms && globalDms[chatKey]) ? globalDms[chatKey] : [];
+        if (msgs.length > 0) {
+            localStorage.setItem('quickpad_read_' + chatKey, msgs[msgs.length - 1].timestamp);
+        }
         if (dmTitle) dmTitle.innerText = name; 
         if (dmWindow) {
             dmWindow.classList.remove('hidden');
@@ -3944,6 +4938,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         }
         if (collaboratorsModal) collaboratorsModal.classList.add('hidden');
         renderChat();
+        updatePresenceUI();
         if (dmInput) {
             setTimeout(() => {
                 dmInput.focus();
@@ -3973,7 +4968,8 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                     avatarContent = escapeHtml(user.avatar);
                 }
                 const colorObj = getPeerColor(cid);
-                const unread = unreadMessages[cid] ? `<span class="glowing-dot" style="position:relative;display:inline-block;margin-left:4px;"></span>` : '';
+                const unreadCount = unreadMessages[cid] || 0;
+                const unread = unreadCount > 0 ? `<span class="peer-unread-dot" style="position:relative;display:inline-block;margin-left:6px;vertical-align:middle;"></span>` : '';
                 
                 html += `
                     <div class="collaborator-item">
@@ -3984,7 +4980,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                                 <div class="collaborator-status">🟢 Active in workspace</div>
                             </div>
                         </div>
-                        ${!isMe ? `<button class="btn-dm-user" data-cid="${escapeHtml(cid)}" data-name="${escapeHtml(user.name)}">💬 Chat</button>` : `<span style="font-size:0.75rem;color:var(--text-muted);">Current User</span>`}
+                        ${!isMe ? `<button class="btn-dm-user" data-cid="${escapeHtml(cid)}" data-name="${escapeHtml(user.name)}" style="${unreadCount > 0 ? 'border-color:#ff0055;color:#ff0055;font-weight:700;' : ''}">💬 Chat${unreadCount > 0 ? ` (${unreadCount})` : ''}</button>` : `<span style="font-size:0.75rem;color:var(--text-muted);">Current User</span>`}
                     </div>
                 `;
             });
@@ -4014,7 +5010,11 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         onlineCountBadge.addEventListener('touchend', toggleCollaborators);
     }
 
-    if (closeDm) closeDm.addEventListener('click', () => { if (dmWindow) dmWindow.classList.add('hidden'); activeChatId = null; });
+    if (closeDm) closeDm.addEventListener('click', () => {
+        if (dmWindow) dmWindow.classList.add('hidden');
+        activeChatId = null;
+        updatePresenceUI();
+    });
 
     async function sendDM() {
         if (!activeChatId || !dmInput || !dmInput.value.trim() || !db) return;
@@ -4030,6 +5030,23 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const encData = await encryptDM(text, receiverPubKey);
             const chatKey = [myDeviceId, activeChatId].sort().join('_');
             const dmObj = { id: Date.now().toString() + Math.random().toString(36).slice(2), sender: myDeviceId, timestamp: Date.now(), ...encData };
+            
+            // Broadcast instantly to local open tabs
+            broadcastLocalSync({
+                type: 'dm_message',
+                chatKey: chatKey,
+                dmObj: dmObj
+            });
+
+            // Optimistic render for current sender
+            if (!globalDms[chatKey]) globalDms[chatKey] = [];
+            if (!globalDms[chatKey].some(m => m.id === dmObj.id)) {
+                globalDms[chatKey].push(dmObj);
+            }
+            decryptedCache[dmObj.id] = text;
+            renderChat();
+
+            // Persist to Firestore
             await db.collection("workspaces").doc(currentToken).set({ dms: { [chatKey]: firebase.firestore.FieldValue.arrayUnion(dmObj) } }, { merge: true });
         } catch (e) {
             showToast("Failed to encrypt and send DM.", 'error');
@@ -4039,20 +5056,63 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     if (dmSend) dmSend.addEventListener('click', sendDM);
     if (dmInput) dmInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') sendDM(); });
 
+    let knownNotifiedMessageIds = new Set();
+    let isInitialDmSync = true;
+
     function calculateUnread(dmsObj) {
+        let hasNewIncomingMessage = false;
+        let newestSenderCid = null;
+
         for (let key in dmsObj) {
             if (key.includes(myDeviceId)) {
                 const parts = key.split('_');
                 const otherCid = parts[0] === myDeviceId ? parts[1] : parts[0];
                 const msgs = dmsObj[key] || [];
-                if (activeChatId === otherCid) {
-                    if (msgs.length > 0) localStorage.setItem('quickpad_read_' + key, msgs[msgs.length - 1].timestamp);
+                const isChatActiveAndVisible = (activeChatId === otherCid && dmWindow && !dmWindow.classList.contains('hidden'));
+
+                if (isChatActiveAndVisible) {
+                    if (msgs.length > 0) {
+                        localStorage.setItem('quickpad_read_' + key, msgs[msgs.length - 1].timestamp);
+                    }
                     unreadMessages[otherCid] = 0;
                 } else {
                     const lastRead = parseInt(localStorage.getItem('quickpad_read_' + key)) || 0;
                     unreadMessages[otherCid] = msgs.filter(m => m.timestamp > lastRead && m.sender !== myDeviceId).length;
                 }
+
+                // Detect un-notified incoming messages
+                for (let m of msgs) {
+                    if (m && m.id) {
+                        if (m.sender !== myDeviceId) {
+                            if (!knownNotifiedMessageIds.has(m.id)) {
+                                knownNotifiedMessageIds.add(m.id);
+                                if (!isInitialDmSync && (Date.now() - m.timestamp < 60000)) {
+                                    hasNewIncomingMessage = true;
+                                    newestSenderCid = otherCid;
+                                }
+                            }
+                        } else {
+                            knownNotifiedMessageIds.add(m.id);
+                        }
+                    }
+                }
             }
+        }
+
+        if (isInitialDmSync) {
+            isInitialDmSync = false;
+        } else if (hasNewIncomingMessage && newestSenderCid) {
+            // Play notification chime and show toast
+            playMessageNotificationSound();
+            const senderName = peerCursorsData[newestSenderCid]?.name || 'Collaborator';
+            showToast(`💬 New message from ${senderName}`, 'info', 4000);
+        }
+
+        if (typeof updatePresenceUI === 'function') {
+            updatePresenceUI();
+        }
+        if (typeof renderCollaboratorsModal === 'function' && collaboratorsModal && !collaboratorsModal.classList.contains('hidden')) {
+            renderCollaboratorsModal();
         }
     }
 
@@ -5775,7 +6835,8 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         { name: "Zero-Knowledge & Privacy Inspector", shortcut: "Audit", action: () => openPrivacyInspector() },
         { name: "Export Note as Image Card", shortcut: "Card", action: () => openCardExportModal() },
         { name: "Toggle Pomodoro Focus Timer", shortcut: "🍅", action: () => togglePomodoro() },
-        { name: "Reset Pomodoro Timer", shortcut: "Reset", action: () => resetPomodoro() }
+        { name: "Reset Pomodoro Timer", shortcut: "Reset", action: () => resetPomodoro() },
+        { name: "🎭 Anonymous Voice Mask Settings", shortcut: "Voice", action: () => openVoiceMaskModal() }
     ];
 
     function renderCmdResults(filterText = "") {

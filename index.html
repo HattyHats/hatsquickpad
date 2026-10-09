@@ -447,11 +447,17 @@
 
             <div class="hud-divider"></div>
 
-            <!-- WebRTC P2P Voice Walkie-Talkie Button -->
-            <button id="hud-voice-btn" class="hud-voice-btn" title="WebRTC Encrypted P2P Voice (Click to toggle mic, Hold space to talk)">
-                <span class="voice-mic-icon">🎙️</span>
-                <span id="hud-voice-status" class="hud-btn-text">Voice</span>
-            </button>
+            <!-- WebRTC Encrypted Voice Walkie-Talkie & Anonymizer Mask -->
+            <div class="hud-voice-pill">
+                <button id="hud-voice-btn" class="hud-voice-btn" title="WebRTC Encrypted Voice (Click to toggle mic • Hold Space to talk)">
+                    <span class="voice-mic-icon">🎙️</span>
+                    <span id="hud-voice-status" class="hud-btn-text">Voice</span>
+                    <span id="hud-voice-mask-tag" class="hud-voice-mask-tag">🤖 Deep</span>
+                </button>
+                <button id="hud-voice-mask-btn" class="hud-voice-mask-btn" title="Change Voice Disguise Mask &amp; Test Audio">
+                    <span>🎭</span>
+                </button>
+            </div>
 
             <!-- Live Tools Dropup Menu -->
             <div class="dropdown-group hud-tools-group" title="Live Collaboration & Developer Tools">
@@ -461,7 +467,11 @@
                     <span class="hud-caret">▾</span>
                 </button>
                 <div id="hud-tools-menu" class="dropdown-menu hud-dropup-menu">
-                    <div class="menu-label">Collaboration &amp; Coding</div>
+                    <div class="menu-label">Collaboration &amp; Audio</div>
+                    <button id="hud-voice-mask-tool-btn" class="menu-action-btn" style="color:var(--primary-color);">
+                        <span>🎭 Anonymous Voice Mask...</span>
+                        <span class="hud-tool-badge">Mask</span>
+                    </button>
                     <button id="hud-dictate-btn" class="menu-action-btn">
                         <span>🗣️ Speech Dictation</span>
                         <span id="hud-dictate-status" class="hud-tool-badge">Dictate</span>
@@ -1060,6 +1070,114 @@
             </div>
 
             <button id="wormhole-send-btn" class="btn primary-action btn-full" style="padding:12px;font-size:1.05rem;">⚡ Select a File to Beam</button>
+        </div>
+    </div>
+
+    <!-- Biometric Voice Mask & Anonymizer Modal -->
+    <div id="voice-mask-modal" class="modal hidden">
+        <div class="modal-content modal-standard voice-mask-modal-content">
+            <span id="close-voice-mask" class="close-btn">&times;</span>
+            
+            <div class="text-center" style="margin-bottom: 16px;">
+                <div class="splash-badge voice-badge" style="margin-bottom:8px; display:inline-flex; align-items:center; gap:6px;">
+                    <span class="live-pulse-dot"></span> BIOMETRIC IDENTITY SHIELD
+                </div>
+                <h2 class="neon-text" style="font-size: 1.6rem; margin-bottom: 4px;">Anonymous Voice Changer</h2>
+                <p class="modal-subtitle" style="margin-bottom:0;">Real-time on-device voice obfuscation. Audio is permanently masked before transmission.</p>
+            </div>
+
+            <!-- Live Audio Visualizer / Monitor Deck -->
+            <div class="voice-monitor-card">
+                <div class="voice-monitor-header">
+                    <div class="voice-monitor-status">
+                        <span class="audio-signal-dot" id="audio-signal-dot"></span>
+                        <span id="voice-monitor-label">Mic Standby</span>
+                    </div>
+                    <button id="voice-test-monitor-btn" class="voice-test-btn" title="Toggle hearing your own disguised voice through your headphones">
+                        <span id="voice-test-icon">🎧</span>
+                        <span id="voice-test-text">Hear My Voice: ON</span>
+                    </button>
+                </div>
+                <canvas id="voice-visualizer-canvas" class="voice-visualizer-canvas" height="50"></canvas>
+                <div class="voice-monitor-hint">
+                    <span>💡 Wear headphones to hear your disguised voice in real time as you speak with zero echo feedback.</span>
+                </div>
+            </div>
+
+            <!-- Mask Preset Cards Grid -->
+            <div class="voice-presets-title">Choose Voice Disguise Profile:</div>
+            <div class="voice-presets-grid">
+                <!-- 1. Deep Anonymous -->
+                <div class="voice-preset-card active" data-mask="deep">
+                    <div class="preset-icon">🤖</div>
+                    <div class="preset-info">
+                        <div class="preset-name">Deep Anonymous</div>
+                        <div class="preset-desc">Sub-harmonic pitch shift + chest resonance. Witness protection filter.</div>
+                    </div>
+                    <span class="preset-check">✓</span>
+                </div>
+
+                <!-- 2. Cyborg / Robot -->
+                <div class="voice-preset-card" data-mask="robot">
+                    <div class="preset-icon">👾</div>
+                    <div class="preset-info">
+                        <div class="preset-name">Cyborg (Robotic)</div>
+                        <div class="preset-desc">Metallic ring modulation + comb resonance. Pure synthetic tone.</div>
+                    </div>
+                    <span class="preset-check">✓</span>
+                </div>
+
+                <!-- 3. Helium / Alien -->
+                <div class="voice-preset-card" data-mask="high">
+                    <div class="preset-icon">🛸</div>
+                    <div class="preset-info">
+                        <div class="preset-name">Helium / Alien</div>
+                        <div class="preset-desc">High pitch shift (+7 semitones) + high-frequency formant shift.</div>
+                    </div>
+                    <span class="preset-check">✓</span>
+                </div>
+
+                <!-- 4. Tactical Radio -->
+                <div class="voice-preset-card" data-mask="radio">
+                    <div class="preset-icon">📻</div>
+                    <div class="preset-info">
+                        <div class="preset-name">Tactical Walkie-Talkie</div>
+                        <div class="preset-desc">Military radio bandpass (450Hz-2.8kHz) + analog clipping overdrive.</div>
+                    </div>
+                    <span class="preset-check">✓</span>
+                </div>
+
+                <!-- 5. Ghost Entity -->
+                <div class="voice-preset-card" data-mask="ghost">
+                    <div class="preset-icon">👻</div>
+                    <div class="preset-info">
+                        <div class="preset-name">Ghost Entity</div>
+                        <div class="preset-desc">Pitch drop + tremolo modulation &amp; cavernous hollow delay.</div>
+                    </div>
+                    <span class="preset-check">✓</span>
+                </div>
+
+                <!-- 6. Natural -->
+                <div class="voice-preset-card" data-mask="normal">
+                    <div class="preset-icon">🎙️</div>
+                    <div class="preset-info">
+                        <div class="preset-name">Natural (Unmasked)</div>
+                        <div class="preset-desc">Clean original voice with standard echo cancellation.</div>
+                    </div>
+                    <span class="preset-check">✓</span>
+                </div>
+            </div>
+
+            <!-- Transmission Mode Selector -->
+            <div class="voice-modal-footer">
+                <button id="voice-modal-toggle-btn" class="btn primary-action btn-full voice-action-btn">
+                    <span id="voice-modal-toggle-icon">🎙️</span>
+                    <span id="voice-modal-toggle-text">Start Live Voice Broadcast</span>
+                </button>
+                <div class="voice-ptt-shortcut-hint">
+                    Click button to start/stop live broadcast • Hold <b>Spacebar</b> anytime to Push-to-Talk.
+                </div>
+            </div>
         </div>
     </div>
 
