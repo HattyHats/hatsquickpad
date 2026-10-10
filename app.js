@@ -1861,6 +1861,11 @@ Everything you type is encrypted directly in your browser with AES-256 before le
 
     function openVoiceMaskModal() {
         if (!voiceMaskModal) return;
+        document.querySelectorAll('.dropdown-menu').forEach(m => {
+            m.classList.remove('show');
+            m.classList.remove('hidden');
+        });
+        document.querySelectorAll('.dropdown-group').forEach(g => g.classList.remove('active'));
         voiceMaskModal.classList.remove('hidden');
         VoiceMaskEngine.updateUiPresetCards();
         VoiceMaskEngine.updateSidetoneUi();
@@ -1872,6 +1877,7 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     function closeVoiceMaskModal() {
         if (!voiceMaskModal) return;
         voiceMaskModal.classList.add('hidden');
+        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('hidden'));
         // If not actively broadcasting, stop visualizer loop to save battery
         if (!isVoiceActive) {
             VoiceMaskEngine.stopVisualizer();
@@ -1900,8 +1906,11 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     if (hudVoiceMaskToolBtn) {
         hudVoiceMaskToolBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const toolsMenu = document.getElementById('hud-tools-menu');
-            if (toolsMenu) toolsMenu.classList.add('hidden');
+            document.querySelectorAll('.dropdown-menu').forEach(m => {
+                m.classList.remove('show');
+                m.classList.remove('hidden');
+            });
+            document.querySelectorAll('.dropdown-group').forEach(g => g.classList.remove('active'));
             openVoiceMaskModal();
         });
     }
@@ -2190,6 +2199,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             clearTimeout(closeTimeout);
             document.querySelectorAll('.dropdown-menu').forEach(m => {
                 m.classList.remove('show');
+                m.classList.remove('hidden');
             });
             document.querySelectorAll('.dropdown-group').forEach(g => {
                 g.classList.remove('active');
@@ -2252,6 +2262,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
             function openThisDropdown() {
                 clearTimeout(closeTimeout);
+                menu.classList.remove('hidden');
                 if (activeMenu && activeMenu !== menu) {
                     activeMenu.classList.remove('show');
                     if (activeGroup) activeGroup.classList.remove('active');
