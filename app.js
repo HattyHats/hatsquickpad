@@ -7453,12 +7453,15 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         let newSelStart = start;
         let newSelEnd = end;
 
+        // Completely clean out any inner <mark...> and </mark> tags or ==
+        const cleanedText = sel
+            .replace(/<mark[^>]*>/gi, '')
+            .replace(/<\/mark>/gi, '')
+            .replace(/==/g, '');
+
         if (color === 'clear') {
             if (!sel) return;
-            // Clear existing highlight marks
-            replacement = sel
-                .replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, '$1')
-                .replace(/==([^=\n\r]+)==/g, '$1');
+            replacement = cleanedText;
             newSelStart = start;
             newSelEnd = start + replacement.length;
         } else {
@@ -7468,12 +7471,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const fmtHlBar = document.getElementById('fmt-hl-preview-bar');
             if (fmtHlBar) fmtHlBar.style.backgroundColor = hlColor;
 
-            let innerText = sel || 'highlighted text';
-            // Unnest if already highlighted
-            innerText = innerText
-                .replace(/^<mark[^>]*>([\s\S]*?)<\/mark>$/gi, '$1')
-                .replace(/^==([\s\S]*?)==$/g, '$1');
-
+            const innerText = cleanedText || 'highlighted text';
             const textColor = getContrastTextColor(hlColor);
             const openTag = `<mark style="background-color: ${hlColor}; color: ${textColor}; padding: 0 4px; border-radius: 3px;">`;
             const closeTag = `</mark>`;
@@ -7489,6 +7487,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
         if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
         editor.dispatchEvent(new Event('input'));
+
         closeHighlightPalette();
         if (floatingFormatBar) floatingFormatBar.classList.add('hidden');
         playMechanicalSound('click');
@@ -7501,7 +7500,6 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         const fmtHighlightBtn = document.getElementById('fmt-highlight-btn');
         const fmtColorPalette = document.getElementById('fmt-color-palette');
         const fmtHlBar = document.getElementById('fmt-hl-preview-bar');
-        const fmtCustomColorInput = document.getElementById('fmt-custom-color-input');
 
         if (fmtHlBar) {
             fmtHlBar.style.backgroundColor = activeHighlightColor;
@@ -7626,27 +7624,6 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 applyHighlight(color);
             });
         });
-
-        // Custom Color Picker
-        if (fmtCustomColorInput) {
-            let savedSel = null;
-            fmtCustomColorInput.addEventListener('mousedown', () => {
-                savedSel = {
-                    start: editor.selectionStart,
-                    end: editor.selectionEnd
-                };
-            });
-            const handleCustomPick = () => {
-                if (savedSel && typeof savedSel.start === 'number') {
-                    editor.selectionStart = savedSel.start;
-                    editor.selectionEnd = savedSel.end;
-                }
-                const chosenColor = fmtCustomColorInput.value;
-                applyHighlight(chosenColor);
-            };
-            fmtCustomColorInput.addEventListener('input', handleCustomPick);
-            fmtCustomColorInput.addEventListener('change', handleCustomPick);
-        }
     }
 
     function applyTextFormat(format) {
