@@ -3797,6 +3797,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
     }
 
+    let lastLockedTabIdShowing = null;
+
     function checkLockedTabUI(tid) {
         if (!tid) tid = activeTabId;
         const tab = tabsData[tid];
@@ -3804,13 +3806,20 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
         if (lockedTabOverlay) {
             if (isLocked) {
+                const wasAlreadyShowingForThisTab = !lockedTabOverlay.classList.contains('hidden') && (lastLockedTabIdShowing === tid);
                 lockedTabOverlay.classList.remove('hidden');
+                lastLockedTabIdShowing = tid;
                 if (lockedTabTitle) lockedTabTitle.innerText = `🔒 ${tab.name || 'Protected Tab'}`;
-                if (lockedTabPassInput) {
-                    lockedTabPassInput.value = '';
-                    setTimeout(() => lockedTabPassInput.focus(), 60);
+
+                // Only clear input and steal focus if opening for the first time or switching to a new tab
+                if (!wasAlreadyShowingForThisTab) {
+                    if (lockedTabPassInput) {
+                        lockedTabPassInput.value = '';
+                        setTimeout(() => lockedTabPassInput.focus(), 60);
+                    }
+                    if (lockedTabError) lockedTabError.classList.add('hidden');
                 }
-                if (lockedTabError) lockedTabError.classList.add('hidden');
+
                 if (editor) {
                     editor.value = '';
                     editor.readOnly = true;
@@ -3819,6 +3828,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 if (editorMirror) editorMirror.style.display = 'none';
                 if (canvasContainer) canvasContainer.classList.add('hidden');
             } else {
+                lastLockedTabIdShowing = null;
                 lockedTabOverlay.classList.add('hidden');
                 if (editor) {
                     editor.readOnly = isReadOnly;
