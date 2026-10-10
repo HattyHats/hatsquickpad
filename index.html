@@ -363,6 +363,34 @@
             <button class="fmt-btn" data-format="bold" title="Bold (Ctrl+B)"><b>B</b></button>
             <button class="fmt-btn" data-format="italic" title="Italic (Ctrl+I)"><i>I</i></button>
             <button class="fmt-btn" data-format="strike" title="Strikethrough"><s>S</s></button>
+            
+            <!-- Highlight with Multi-Color Palette Dropdown -->
+            <div class="fmt-highlight-wrap" id="fmt-highlight-wrap">
+                <button type="button" class="fmt-btn fmt-highlight-btn" id="fmt-highlight-btn" title="Highlight Text (Choose Color)">
+                    <span class="fmt-hl-icon">🖍️</span>
+                    <span class="fmt-hl-preview-bar" id="fmt-hl-preview-bar"></span>
+                    <span class="fmt-caret">▾</span>
+                </button>
+                <div class="fmt-color-palette hidden" id="fmt-color-palette">
+                    <div class="fmt-palette-header">
+                        <span class="fmt-palette-title">Highlight Color</span>
+                    </div>
+                    <div class="fmt-swatches">
+                        <button type="button" class="fmt-swatch" data-color="#ffe066" title="Yellow" style="--swatch-color: #ffe066; background: #ffe066;"></button>
+                        <button type="button" class="fmt-swatch" data-color="#69db7c" title="Green" style="--swatch-color: #69db7c; background: #69db7c;"></button>
+                        <button type="button" class="fmt-swatch" data-color="#4dabf7" title="Cyan / Blue" style="--swatch-color: #4dabf7; background: #4dabf7;"></button>
+                        <button type="button" class="fmt-swatch" data-color="#f783ac" title="Pink" style="--swatch-color: #f783ac; background: #f783ac;"></button>
+                        <button type="button" class="fmt-swatch" data-color="#ffa94d" title="Orange" style="--swatch-color: #ffa94d; background: #ffa94d;"></button>
+                        <button type="button" class="fmt-swatch" data-color="#b197fc" title="Purple" style="--swatch-color: #b197fc; background: #b197fc;"></button>
+                        <div class="fmt-swatch-custom-wrap" title="Custom Color Picker">
+                            <input type="color" id="fmt-custom-color-input" class="fmt-custom-color-input" value="#ffe066">
+                            <span class="fmt-custom-color-btn">🎨</span>
+                        </div>
+                        <button type="button" class="fmt-swatch fmt-swatch-clear" data-color="clear" title="Remove Highlight">✕</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="fmt-divider"></div>
             <button class="fmt-btn" data-format="h1" title="Heading 1"><b>H1</b></button>
             <button class="fmt-btn" data-format="h2" title="Heading 2"><b>H2</b></button>
@@ -1228,7 +1256,7 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=70"></script>
+    <script src="app.js?v=72"></script>
     <script>
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             let refreshing = false;

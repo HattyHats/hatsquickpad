@@ -812,7 +812,8 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     if (panicExitBtn) panicExitBtn.addEventListener('click', () => togglePanicMode(false));
 
     window.addEventListener('keydown', (e) => {
-        if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+        const isP = e.code === 'KeyP' || e.key.toLowerCase() === 'p' || e.key === 'π';
+        if (e.altKey && isP) {
             e.preventDefault();
             togglePanicMode();
         }
@@ -2515,12 +2516,16 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (!isMarkdown && !isSplitMode) return;
         if (typeof marked === 'undefined' || !preview || !editor) return;
         
-        // 1. Pre-process poll syntax into cyber poll cards
+        // 1. Pre-process poll syntax into cyber poll cards & markdown highlights
         const rawContent = editor.value || '';
-        const pollProcessedContent = processPollMarkup(rawContent);
+        let processedContent = processPollMarkup(rawContent);
+        // Pre-process markdown ==highlight== syntax into <mark>
+        processedContent = processedContent.replace(/==([^=\n\r]+)==/g, '<mark class="hl-yellow">$1</mark>');
 
-        // 2. Render Markdown & sanitize
-        const html = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(marked.parse(pollProcessedContent)) : marked.parse(pollProcessedContent);
+        // 2. Render Markdown & sanitize (preserving mark and style attributes)
+        const html = typeof DOMPurify !== 'undefined' 
+            ? DOMPurify.sanitize(marked.parse(processedContent), { ADD_TAGS: ['mark'], ADD_ATTR: ['style', 'class'] }) 
+            : marked.parse(processedContent);
         preview.innerHTML = html;
         
         // 3. Apply syntax highlighting to code blocks in preview
@@ -7085,6 +7090,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         { name: "Export Note as Image Card", shortcut: "Card", action: () => openCardExportModal() },
         { name: "Toggle Pomodoro Focus Timer", shortcut: "🍅", action: () => togglePomodoro() },
         { name: "Reset Pomodoro Timer", shortcut: "Reset", action: () => resetPomodoro() },
+        { name: "Highlight Selected Text", shortcut: "Mark", action: () => applyHighlight() },
         { name: "🎭 Anonymous Voice Mask Settings", shortcut: "Voice", action: () => openVoiceMaskModal() }
     ];
 
@@ -7161,18 +7167,21 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             e.preventDefault();
             toggleCodeRunner(true);
         }
-        // Alt+M Markdown
-        if (e.altKey && e.key.toLowerCase() === 'm') {
+        // Alt+M / Option+M or Cmd+Shift+M Markdown
+        const isM = e.code === 'KeyM' || e.key.toLowerCase() === 'm' || e.key === 'µ';
+        if ((e.altKey && isM) || ((e.metaKey || e.ctrlKey) && e.shiftKey && isM)) {
             e.preventDefault();
             if (mdToggleBtn) mdToggleBtn.click();
         }
-        // Alt+S Split
-        if (e.altKey && e.key.toLowerCase() === 's') {
+        // Alt+S / Option+S or Cmd+Shift+S Split
+        const isS = e.code === 'KeyS' || e.key.toLowerCase() === 's' || e.key === 'ß';
+        if ((e.altKey && isS) || ((e.metaKey || e.ctrlKey) && e.shiftKey && isS)) {
             e.preventDefault();
             if (splitToggleBtn) splitToggleBtn.click();
         }
-        // Alt+Z Zen
-        if (e.altKey && e.key.toLowerCase() === 'z') {
+        // Alt+Z / Option+Z or Cmd+Shift+Z Zen
+        const isZ = e.code === 'KeyZ' || e.key.toLowerCase() === 'z' || e.key === 'Ω';
+        if ((e.altKey && isZ) || ((e.metaKey || e.ctrlKey) && e.shiftKey && isZ)) {
             e.preventDefault();
             if (document.body.classList.contains('zen-mode')) {
                 if (zenExitBtn) zenExitBtn.click();
@@ -7180,23 +7189,27 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 if (zenBtn) zenBtn.click();
             }
         }
-        // Alt+T Typewriter Scroll
-        if (e.altKey && e.key.toLowerCase() === 't') {
+        // Alt+T / Option+T Typewriter Scroll
+        const isT = e.code === 'KeyT' || e.key.toLowerCase() === 't' || e.key === '†';
+        if (e.altKey && isT) {
             e.preventDefault();
             toggleTypewriterMode();
         }
-        // Alt+H Focus Dimming
-        if (e.altKey && e.key.toLowerCase() === 'h') {
+        // Alt+H / Option+H Focus Dimming
+        const isH = e.code === 'KeyH' || e.key.toLowerCase() === 'h' || e.key === '˙';
+        if (e.altKey && isH) {
             e.preventDefault();
             toggleFocusMode();
         }
-        // Alt+O Presenter Spotlight
-        if (e.altKey && e.key.toLowerCase() === 'o') {
+        // Alt+O / Option+O Presenter Spotlight
+        const isO = e.code === 'KeyO' || e.key.toLowerCase() === 'o' || e.key === 'ø';
+        if (e.altKey && isO) {
             e.preventDefault();
             togglePresenterSpotlight();
         }
-        // Alt+L Laser Pointer
-        if (e.altKey && e.key.toLowerCase() === 'l') {
+        // Alt+L / Option+L Laser Pointer
+        const isL = e.code === 'KeyL' || e.key.toLowerCase() === 'l' || e.key === '¬';
+        if (e.altKey && isL) {
             e.preventDefault();
             toggleLaserPointer();
         }
@@ -7387,30 +7400,137 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         }
     }
 
-    // 2. Floating Medium/Notion-Style Text Formatting Mini-Bar
+    // 2. Floating Medium/Notion-Style Text Formatting Mini-Bar & Highlighting
     const floatingFormatBar = document.getElementById('floating-format-bar');
+    let activeHighlightColor = localStorage.getItem('quickpad_last_highlight_color') || '#ffe066';
+    let paletteCloseTimer = null;
+
+    function getContrastTextColor(hex) {
+        if (!hex || typeof hex !== 'string') return '#0f172a';
+        let cleanHex = hex.replace('#', '').trim();
+        if (cleanHex.length === 3) {
+            cleanHex = cleanHex.split('').map(c => c + c).join('');
+        }
+        if (cleanHex.length !== 6) return '#0f172a';
+        const r = parseInt(cleanHex.substring(0, 2), 16) || 0;
+        const g = parseInt(cleanHex.substring(2, 4), 16) || 0;
+        const b = parseInt(cleanHex.substring(4, 6), 16) || 0;
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return luminance > 0.55 ? '#0f172a' : '#ffffff';
+    }
+
+    function openHighlightPalette() {
+        const colorPalette = document.getElementById('fmt-color-palette');
+        if (!colorPalette) return;
+        clearTimeout(paletteCloseTimer);
+        colorPalette.classList.remove('hidden');
+    }
+
+    function closeHighlightPalette() {
+        const colorPalette = document.getElementById('fmt-color-palette');
+        if (!colorPalette) return;
+        clearTimeout(paletteCloseTimer);
+        colorPalette.classList.add('hidden');
+    }
+
+    function toggleHighlightPalette() {
+        const colorPalette = document.getElementById('fmt-color-palette');
+        if (!colorPalette) return;
+        if (colorPalette.classList.contains('hidden')) {
+            openHighlightPalette();
+        } else {
+            closeHighlightPalette();
+        }
+    }
+
+    function applyHighlight(color = activeHighlightColor) {
+        if (!editor) return;
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        const val = editor.value;
+        const sel = val.substring(start, end);
+        let replacement = '';
+        let newSelStart = start;
+        let newSelEnd = end;
+
+        if (color === 'clear') {
+            if (!sel) return;
+            // Clear existing highlight marks
+            replacement = sel
+                .replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, '$1')
+                .replace(/==([^=\n\r]+)==/g, '$1');
+            newSelStart = start;
+            newSelEnd = start + replacement.length;
+        } else {
+            const hlColor = color || '#ffe066';
+            activeHighlightColor = hlColor;
+            localStorage.setItem('quickpad_last_highlight_color', hlColor);
+            const fmtHlBar = document.getElementById('fmt-hl-preview-bar');
+            if (fmtHlBar) fmtHlBar.style.backgroundColor = hlColor;
+
+            let innerText = sel || 'highlighted text';
+            // Unnest if already highlighted
+            innerText = innerText
+                .replace(/^<mark[^>]*>([\s\S]*?)<\/mark>$/gi, '$1')
+                .replace(/^==([\s\S]*?)==$/g, '$1');
+
+            const textColor = getContrastTextColor(hlColor);
+            const openTag = `<mark style="background-color: ${hlColor}; color: ${textColor}; padding: 0 4px; border-radius: 3px;">`;
+            const closeTag = `</mark>`;
+            replacement = `${openTag}${innerText}${closeTag}`;
+            newSelStart = start + openTag.length;
+            newSelEnd = newSelStart + innerText.length;
+        }
+
+        editor.value = val.substring(0, start) + replacement + val.substring(end);
+        editor.selectionStart = newSelStart;
+        editor.selectionEnd = newSelEnd;
+        editor.focus();
+
+        if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+        editor.dispatchEvent(new Event('input'));
+        closeHighlightPalette();
+        if (floatingFormatBar) floatingFormatBar.classList.add('hidden');
+        playMechanicalSound('click');
+    }
 
     function initFloatingFormatBar() {
         if (!floatingFormatBar || !editor) return;
 
+        const fmtHighlightWrap = document.getElementById('fmt-highlight-wrap');
+        const fmtHighlightBtn = document.getElementById('fmt-highlight-btn');
+        const fmtColorPalette = document.getElementById('fmt-color-palette');
+        const fmtHlBar = document.getElementById('fmt-hl-preview-bar');
+        const fmtCustomColorInput = document.getElementById('fmt-custom-color-input');
+
+        if (fmtHlBar) {
+            fmtHlBar.style.backgroundColor = activeHighlightColor;
+        }
+
         function updateFormatBarPos() {
             if (isBurnMode || !tabsData[activeTabId] || (tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw'))) {
                 floatingFormatBar.classList.add('hidden');
+                closeHighlightPalette();
                 return;
             }
             const start = editor.selectionStart;
             const end = editor.selectionEnd;
             if (typeof start !== 'number' || typeof end !== 'number' || start === end) {
                 floatingFormatBar.classList.add('hidden');
+                closeHighlightPalette();
                 return;
             }
 
             const coord = getCaretCoordinates(start);
-            const barWidth = 320;
-            const barHeight = 36;
+            const barWidth = floatingFormatBar.offsetWidth || 380;
+            const barHeight = floatingFormatBar.offsetHeight || 36;
 
             let top = coord.top - barHeight - 12;
-            if (top < 10) top = coord.top + 28;
+            let paletteDown = false;
+            if (top < 10) {
+                top = coord.top + 28;
+                paletteDown = true;
+            }
             let left = coord.left;
             if (left + barWidth > editor.clientWidth) {
                 left = Math.max(10, editor.clientWidth - barWidth - 10);
@@ -7420,6 +7540,14 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             floatingFormatBar.style.top = `${top}px`;
             floatingFormatBar.style.left = `${left}px`;
             floatingFormatBar.classList.remove('hidden');
+
+            if (fmtColorPalette) {
+                if (paletteDown || top < 70) {
+                    fmtColorPalette.classList.add('palette-down');
+                } else {
+                    fmtColorPalette.classList.remove('palette-down');
+                }
+            }
         }
 
         editor.addEventListener('mouseup', () => setTimeout(updateFormatBarPos, 10));
@@ -7430,8 +7558,15 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         });
 
         document.addEventListener('selectionchange', () => {
-            if (document.activeElement !== editor) {
+            if (document.activeElement !== editor && (!floatingFormatBar || !floatingFormatBar.contains(document.activeElement))) {
                 floatingFormatBar.classList.add('hidden');
+                closeHighlightPalette();
+            }
+        });
+
+        document.addEventListener('mousedown', (e) => {
+            if (floatingFormatBar && !floatingFormatBar.contains(e.target)) {
+                closeHighlightPalette();
             }
         });
 
@@ -7441,7 +7576,8 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             }
         });
 
-        const fmtButtons = floatingFormatBar.querySelectorAll('.fmt-btn');
+        // Standard formatting buttons with data-format
+        const fmtButtons = floatingFormatBar.querySelectorAll('.fmt-btn[data-format]');
         fmtButtons.forEach(btn => {
             btn.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -7452,6 +7588,65 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 applyTextFormat(fmt);
             });
         });
+
+        // Highlight Wrapper & Button Interaction
+        if (fmtHighlightWrap) {
+            fmtHighlightWrap.addEventListener('mouseenter', () => {
+                clearTimeout(paletteCloseTimer);
+                openHighlightPalette();
+            });
+            fmtHighlightWrap.addEventListener('mouseleave', () => {
+                paletteCloseTimer = setTimeout(() => {
+                    closeHighlightPalette();
+                }, 280);
+            });
+        }
+
+        if (fmtHighlightBtn) {
+            fmtHighlightBtn.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // Keep textarea selection
+            });
+            fmtHighlightBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleHighlightPalette();
+            });
+        }
+
+        // Swatches
+        const swatches = floatingFormatBar.querySelectorAll('.fmt-swatch');
+        swatches.forEach(swatch => {
+            swatch.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // Keep textarea selection
+            });
+            swatch.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const color = swatch.getAttribute('data-color');
+                applyHighlight(color);
+            });
+        });
+
+        // Custom Color Picker
+        if (fmtCustomColorInput) {
+            let savedSel = null;
+            fmtCustomColorInput.addEventListener('mousedown', () => {
+                savedSel = {
+                    start: editor.selectionStart,
+                    end: editor.selectionEnd
+                };
+            });
+            const handleCustomPick = () => {
+                if (savedSel && typeof savedSel.start === 'number') {
+                    editor.selectionStart = savedSel.start;
+                    editor.selectionEnd = savedSel.end;
+                }
+                const chosenColor = fmtCustomColorInput.value;
+                applyHighlight(chosenColor);
+            };
+            fmtCustomColorInput.addEventListener('input', handleCustomPick);
+            fmtCustomColorInput.addEventListener('change', handleCustomPick);
+        }
     }
 
     function applyTextFormat(format) {
@@ -7521,6 +7716,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
         if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
         editor.dispatchEvent(new Event('input'));
+        closeHighlightPalette();
         floatingFormatBar.classList.add('hidden');
         playMechanicalSound('click');
     }
