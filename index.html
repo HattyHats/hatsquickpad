@@ -405,6 +405,20 @@
             </div>
             <canvas id="whiteboard-canvas"></canvas>
         </div>
+
+        <!-- Locked Tab Vault Screen (Protects nested secret tabs from showing ciphertext) -->
+        <div id="locked-tab-overlay" class="locked-tab-overlay hidden">
+            <div class="locked-tab-card">
+                <div class="locked-tab-icon">🔒</div>
+                <h3 id="locked-tab-title">Protected Tab</h3>
+                <p class="locked-tab-desc">This tab is a secure nested vault encrypted with a private password.</p>
+                <div class="locked-tab-form">
+                    <input type="password" id="locked-tab-pass-input" placeholder="Enter password to unlock..." autocomplete="off">
+                    <button id="locked-tab-unlock-btn" class="btn primary-action">Unlock Tab</button>
+                </div>
+                <div id="locked-tab-error" class="locked-tab-error hidden">Incorrect password. Please try again.</div>
+            </div>
+        </div>
     </main>
 
     <!-- Sandboxed Live Code Runner Console Drawer -->
@@ -1214,7 +1228,7 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=67"></script>
+    <script src="app.js?v=68"></script>
     <script>
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             let refreshing = false;

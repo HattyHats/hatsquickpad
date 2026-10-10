@@ -4092,4 +4092,97 @@ body.focus-mode .focus-line-indicator {
     gap: 12px;
 }
 
+/* Locked Tab Vault Screen */
+.locked-tab-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(5, 8, 16, 0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 20px;
+    animation: fade-in 0.2s ease-out;
+}
+.locked-tab-overlay.hidden {
+    display: none !important;
+}
+.locked-tab-card {
+    background: rgba(15, 23, 42, 0.96);
+    border: 1px solid rgba(var(--primary-rgb), 0.35);
+    border-radius: 16px;
+    padding: 32px 28px;
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 24px rgba(var(--primary-rgb), 0.15);
+}
+.locked-tab-icon {
+    font-size: 2.8rem;
+    margin-bottom: 12px;
+    filter: drop-shadow(0 0 12px rgba(var(--primary-rgb), 0.6));
+}
+.locked-tab-card h3 {
+    margin: 0 0 8px 0;
+    font-size: 1.25rem;
+    color: #fff;
+    font-weight: 600;
+}
+.locked-tab-desc {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    margin: 0 0 20px 0;
+    line-height: 1.45;
+}
+.locked-tab-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.locked-tab-form input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: #fff;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.locked-tab-form input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 10px rgba(var(--primary-rgb), 0.3);
+}
+.locked-tab-form button {
+    white-space: nowrap;
+    padding: 10px 18px;
+    font-weight: 600;
+    border-radius: 8px;
+}
+.locked-tab-error {
+    color: #ff3366;
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin-top: 8px;
+    animation: fade-in 0.2s;
+}
+.locked-tab-error.hidden {
+    display: none !important;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-8px); }
+    40%, 80% { transform: translateX(8px); }
+}
+.shake {
+    animation: shake 0.4s ease-in-out;
+}
+
 

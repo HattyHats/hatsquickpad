@@ -101,6 +101,13 @@
     const inspectorSaltHex = document.getElementById('inspector-salt-hex');
     const inspectorCipherHex = document.getElementById('inspector-cipher-hex');
 
+    // --- Nested Secret Tab Vault Elements ---
+    const lockedTabOverlay = document.getElementById('locked-tab-overlay');
+    const lockedTabTitle = document.getElementById('locked-tab-title');
+    const lockedTabPassInput = document.getElementById('locked-tab-pass-input');
+    const lockedTabUnlockBtn = document.getElementById('locked-tab-unlock-btn');
+    const lockedTabError = document.getElementById('locked-tab-error');
+
     // --- Modal Close Buttons ---
     const closeInfo = document.getElementById('close-info');
     const closeShare = document.getElementById('close-share');
@@ -2922,6 +2929,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 try {
                     if (data.type === 'tab_content') {
                         if (tabsData[data.tid]) {
+                            // If tab is secret on this tab and not unlocked, ignore local broadcast
+                            if (tabsData[data.tid].is_secret && !tabsData[data.tid].secret_pass) {
+                                return;
+                            }
                             tabsData[data.tid].content = data.content;
                             lastSavedTabsJSON = JSON.stringify(tabsData);
                             lastSyncedServerTabs[data.tid] = { content: data.content };
@@ -2951,10 +2962,21 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         }
                     } else if (data.type === 'tabs_structure') {
                     if (data.tabs) {
-                        tabsData = data.tabs;
+                        for (let tid in data.tabs) {
+                            if (!tabsData[tid]) {
+                                tabsData[tid] = data.tabs[tid];
+                            } else {
+                                tabsData[tid].name = data.tabs[tid].name;
+                                if (tabsData[tid].is_secret !== !!data.tabs[tid].is_secret) {
+                                    tabsData[tid].is_secret = !!data.tabs[tid].is_secret;
+                                    if (!tabsData[tid].is_secret) tabsData[tid].secret_pass = null;
+                                }
+                            }
+                        }
                         lastSavedTabsJSON = JSON.stringify(tabsData);
                         renderTabs();
-                        if (tabsData[activeTabId] && editor) {
+                        if (typeof checkLockedTabUI === 'function') checkLockedTabUI(activeTabId);
+                        if (tabsData[activeTabId] && editor && (!tabsData[activeTabId].is_secret || tabsData[activeTabId].secret_pass)) {
                             editor.value = tabsData[activeTabId].content || '';
                             updatePreview();
                             updateHUD();
@@ -3373,18 +3395,54 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             for (let tid in serverTabs) {
                                 let sTab = serverTabs[tid];
                                 let content = sTab.content || '';
-                                
+                                const isServerSecret = !!sTab.is_secret;
+                                const isCiphertext = content.startsWith("U2FsdGVkX1");
+
                                 if (!tabsData[tid]) { 
-                                    tabsData[tid] = { name: sTab.name, content: content, is_encrypted: sTab.is_encrypted || false, is_secret: sTab.is_secret || false }; 
+                                    tabsData[tid] = { 
+                                        name: sTab.name, 
+                                        content: (isServerSecret && isCiphertext) ? '' : content, 
+                                        encrypted_blob: (isServerSecret && isCiphertext) ? content : null,
+                                        is_encrypted: sTab.is_encrypted || false, 
+                                        is_secret: isServerSecret,
+                                        secret_pass: null
+                                    }; 
                                     tabsUpdated = true;
-                                    if (tid === activeTabId && editor) {
-                                        editor.value = (sTab.is_secret && content.startsWith("U2FsdGVkX1")) ? "[ LOCKED TAB - Please click the tab again and enter password to view ]" : content;
-                                        editor.readOnly = isReadOnly || (sTab.is_secret && content.startsWith("U2FsdGVkX1"));
+                                    if (tid === activeTabId) {
+                                        if (typeof checkLockedTabUI === 'function') checkLockedTabUI(tid);
+                                        if (!isServerSecret || tabsData[tid].secret_pass) {
+                                            if (editor) {
+                                                editor.value = content;
+                                                editor.readOnly = isReadOnly;
+                                            }
+                                        }
                                         updatePreview();
                                         updateHUD();
                                     }
                                 } else {
-                                    if (tabsData[tid].name !== sTab.name) { tabsData[tid].name = sTab.name; tabsUpdated = true; }
+                                    if (tabsData[tid].name !== sTab.name) { 
+                                        tabsData[tid].name = sTab.name; 
+                                        tabsUpdated = true; 
+                                    }
+                                    if (tabsData[tid].is_secret !== isServerSecret) {
+                                        tabsData[tid].is_secret = isServerSecret;
+                                        tabsUpdated = true;
+                                        if (!isServerSecret) {
+                                            tabsData[tid].secret_pass = null;
+                                            tabsData[tid].encrypted_blob = null;
+                                        }
+                                    }
+
+                                    // If secret tab was updated with ciphertext and this tab doesn't have password
+                                    if (isServerSecret && isCiphertext && !tabsData[tid].secret_pass) {
+                                        tabsData[tid].encrypted_blob = content;
+                                        if (tid === activeTabId && typeof checkLockedTabUI === 'function') {
+                                            checkLockedTabUI(tid);
+                                        }
+                                        lastSyncedServerTabs[tid] = { content: content };
+                                        continue;
+                                    }
+
                                     let localContent = tabsData[tid].content;
                                     let baseContent = lastSyncedServerTabs[tid] ? lastSyncedServerTabs[tid].content : '';
                                     let normLocal = (localContent || '').replace(/\r\n/g, '\n').trimEnd();
@@ -3403,6 +3461,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         tabsData[tid].content = content; 
                                         tabsContentDirty = false;
                                         if (tid === activeTabId && (!isTyping || document.activeElement !== editor)) {
+                                            if (typeof checkLockedTabUI === 'function') checkLockedTabUI(tid);
                                             const isDraw = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
                                             if (isDraw) {
                                                 if (typeof wbIsDrawing !== 'undefined' && !wbIsDrawing) {
@@ -3410,8 +3469,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                                 }
                                             } else if (editor) {
                                                 let cursor = editor.selectionStart || 0;
-                                                editor.value = (tabsData[tid].is_secret && !tabsData[tid].secret_pass && content.startsWith("U2FsdGVkX1")) ? "[ LOCKED TAB - Please click the tab again and enter password to view ]" : content;
-                                                editor.readOnly = isReadOnly || (tabsData[tid].is_secret && !tabsData[tid].secret_pass);
+                                                editor.value = content;
+                                                editor.readOnly = isReadOnly;
                                                 const safePos = Math.min(cursor, content.length);
                                                 editor.setSelectionRange(safePos, safePos);
                                                 updatePreview();
@@ -3457,6 +3516,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             
                             lastSavedTabsJSON = JSON.stringify(tabsData);
                             if (tabsUpdated) renderTabs();
+                            if (typeof checkLockedTabUI === 'function') checkLockedTabUI(activeTabId);
                         }
 
                         if (data.dms) {
@@ -3737,29 +3797,108 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
     }
 
-    async function switchTab(tid, skipSave = false) {
-        if (tabsData[tid] && tabsData[tid].is_secret && !tabsData[tid].secret_pass && tabsData[tid].content && tabsData[tid].content.startsWith("U2FsdGVkX1")) {
-            const pass = await showCustomPrompt("Unlock Tab", "This tab is a nested vault. Enter password to view:");
-            if (!pass) return; // cancel switch
-            
-            try {
-                if (typeof CryptoJS !== 'undefined') {
-                    const bytes = CryptoJS.AES.decrypt(tabsData[tid].content, pass.trim());
-                    const dec = bytes.toString(CryptoJS.enc.Utf8);
-                    if (dec || bytes.sigBytes >= 0) {
-                        tabsData[tid].content = dec;
-                        tabsData[tid].secret_pass = pass.trim();
-                        showToast("Tab unlocked!", 'success');
-                    } else {
-                        showToast("Incorrect password.", 'error');
-                        return;
-                    }
+    function checkLockedTabUI(tid) {
+        if (!tid) tid = activeTabId;
+        const tab = tabsData[tid];
+        const isLocked = !!(tab && tab.is_secret && !tab.secret_pass);
+
+        if (lockedTabOverlay) {
+            if (isLocked) {
+                lockedTabOverlay.classList.remove('hidden');
+                if (lockedTabTitle) lockedTabTitle.innerText = `🔒 ${tab.name || 'Protected Tab'}`;
+                if (lockedTabPassInput) {
+                    lockedTabPassInput.value = '';
+                    setTimeout(() => lockedTabPassInput.focus(), 60);
                 }
-            } catch(e) {
-                showToast("Incorrect password.", 'error');
-                return;
+                if (lockedTabError) lockedTabError.classList.add('hidden');
+                if (editor) {
+                    editor.value = '';
+                    editor.readOnly = true;
+                }
+                if (preview) preview.style.display = 'none';
+                if (editorMirror) editorMirror.style.display = 'none';
+                if (canvasContainer) canvasContainer.classList.add('hidden');
+            } else {
+                lockedTabOverlay.classList.add('hidden');
+                if (editor) {
+                    editor.readOnly = isReadOnly;
+                }
             }
         }
+    }
+
+    async function unlockSecretTab(pass) {
+        if (!activeTabId || !tabsData[activeTabId]) return false;
+        const tab = tabsData[activeTabId];
+        if (!tab.is_secret || !pass) return false;
+
+        const trimmedPass = pass.trim();
+        const ciphertext = tab.encrypted_blob || tab.content;
+
+        if (ciphertext && ciphertext.startsWith("U2FsdGVkX1")) {
+            try {
+                if (typeof CryptoJS !== 'undefined') {
+                    const bytes = CryptoJS.AES.decrypt(ciphertext, trimmedPass);
+                    const dec = bytes.toString(CryptoJS.enc.Utf8);
+                    if (dec || bytes.sigBytes >= 0) {
+                        tab.content = dec;
+                        tab.secret_pass = trimmedPass;
+                        tab.encrypted_blob = null;
+                        checkLockedTabUI(activeTabId);
+                        if (editor) {
+                            editor.value = dec;
+                            editor.readOnly = isReadOnly;
+                            editor.focus();
+                        }
+                        updatePreview();
+                        updateHUD();
+                        renderTabs();
+                        showToast("Tab unlocked successfully!", 'success');
+                        return true;
+                    }
+                }
+            } catch(e) {}
+
+            // Incorrect password
+            if (lockedTabError) lockedTabError.classList.remove('hidden');
+            if (lockedTabPassInput) {
+                lockedTabPassInput.classList.add('shake');
+                setTimeout(() => lockedTabPassInput.classList.remove('shake'), 400);
+                lockedTabPassInput.select();
+            }
+            showToast("Incorrect password.", 'error');
+            return false;
+        } else {
+            // Tab was empty or not encrypted
+            tab.secret_pass = trimmedPass;
+            checkLockedTabUI(activeTabId);
+            if (editor) {
+                editor.value = tab.content || '';
+                editor.readOnly = isReadOnly;
+                editor.focus();
+            }
+            renderTabs();
+            showToast("Tab unlocked!", 'success');
+            return true;
+        }
+    }
+
+    if (lockedTabUnlockBtn) {
+        lockedTabUnlockBtn.addEventListener('click', () => {
+            if (lockedTabPassInput) unlockSecretTab(lockedTabPassInput.value);
+        });
+    }
+    if (lockedTabPassInput) {
+        lockedTabPassInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                unlockSecretTab(lockedTabPassInput.value);
+            }
+        });
+    }
+
+    async function switchTab(tid, skipSave = false) {
+        if (!tabsData[tid]) return;
 
         if (activeTabId !== tid && activeTabId && tabsData[activeTabId]) {
             if (tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw')) {
@@ -3768,12 +3907,26 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     saveWorkspace();
                 }
             } else if (editor) {
-                tabsData[activeTabId].content = editor.value;
+                if (!tabsData[activeTabId].is_secret || tabsData[activeTabId].secret_pass) {
+                    tabsData[activeTabId].content = editor.value;
+                }
             }
         }
         
         activeTabId = tid; 
         const isDrawTab = tabsData[tid] && tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
+
+        // Check if destination tab is locked and user does NOT have the password
+        if (tabsData[tid].is_secret && !tabsData[tid].secret_pass) {
+            checkLockedTabUI(tid);
+            renderTabs();
+            updatePreview();
+            updateHUD();
+            isTyping = false;
+            return;
+        }
+
+        checkLockedTabUI(tid);
 
         if (isDrawTab) {
             if (canvasContainer) canvasContainer.classList.remove('hidden');
@@ -3882,7 +4035,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 payload.tabs = {};
                 for (let tid in tabsData) {
                     let contentToSave = tabsData[tid].content;
-                    if (tabsData[tid].is_secret && tabsData[tid].secret_pass && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                    if (tabsData[tid].is_secret && !tabsData[tid].secret_pass && tabsData[tid].encrypted_blob) {
+                        contentToSave = tabsData[tid].encrypted_blob;
+                    } else if (tabsData[tid].is_secret && tabsData[tid].secret_pass && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
                         contentToSave = CryptoJS.AES.encrypt(contentToSave, tabsData[tid].secret_pass).toString();
                     }
                     if (vaultPassword && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
@@ -4148,6 +4303,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     if (editor) {
         editor.addEventListener('input', () => {
             if (isBurnMode) return;
+            if (tabsData[activeTabId] && tabsData[activeTabId].is_secret && !tabsData[activeTabId].secret_pass) return;
             if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
             tabsContentDirty = true;
             broadcastLocalSync({
@@ -7060,8 +7216,15 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             if (remove) {
                 tabsData[activeTabId].is_secret = false;
                 tabsData[activeTabId].secret_pass = null;
+                tabsData[activeTabId].encrypted_blob = null;
                 saveWorkspace();
                 renderTabs();
+                checkLockedTabUI(activeTabId);
+                broadcastLocalSync({
+                    type: 'tabs_structure',
+                    tabs: tabsData,
+                    senderId: myDeviceId
+                });
                 showToast("Tab lock removed.", 'success');
             }
             return;
@@ -7072,6 +7235,12 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             tabsData[activeTabId].secret_pass = pass.trim();
             saveWorkspace();
             renderTabs();
+            checkLockedTabUI(activeTabId);
+            broadcastLocalSync({
+                type: 'tabs_structure',
+                tabs: tabsData,
+                senderId: myDeviceId
+            });
             showToast("Tab locked successfully!", 'success');
         }
     }
