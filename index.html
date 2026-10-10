@@ -1214,12 +1214,13 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=60"></script>
+    <script src="app.js?v=67"></script>
     <script>
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             let refreshing = false;
+            let hadController = !!navigator.serviceWorker.controller;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (!refreshing) {
+                if (hadController && !refreshing) {
                     refreshing = true;
                     window.location.reload();
                 }

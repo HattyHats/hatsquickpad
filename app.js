@@ -2,8 +2,21 @@
 (function() {
     'use strict';
 
-    // Generate Unique In-Memory Collaborator ID for this tab session
-    const myDeviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+    // Maintain stable device ID across reloads of the same tab, preventing ghost duplicate collaborators
+    let myDeviceId;
+    try {
+        const navEntry = (window.performance && window.performance.getEntriesByType) ? window.performance.getEntriesByType('navigation')[0] : null;
+        const isReload = (navEntry && navEntry.type === 'reload') || (window.performance && window.performance.navigation && window.performance.navigation.type === 1);
+        const storedId = sessionStorage.getItem('quickpad_tab_dev_id');
+        if (storedId && isReload) {
+            myDeviceId = storedId;
+        } else {
+            myDeviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+            sessionStorage.setItem('quickpad_tab_dev_id', myDeviceId);
+        }
+    } catch(e) {
+        myDeviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+    }
     const myTabInstanceId = 'tab_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
 
     // iOS Keyboard Dismiss Fix
@@ -663,33 +676,69 @@ Everything you type is encrypted directly in your browser with AES-256 before le
 
     // 2. --- Cipher Decryption Glitch Animation ---
     let glitchInterval = null;
+    let currentGlitchOriginal = '';
+
+    function stopCipherGlitchAnimation() {
+        if (glitchInterval) {
+            clearInterval(glitchInterval);
+            glitchInterval = null;
+            if (editor && currentGlitchOriginal) {
+                editor.value = currentGlitchOriginal;
+            }
+        }
+    }
+
     function triggerCipherGlitchAnimation(targetText) {
         if (!editor || !isGlitchDecryptEnabled || !targetText) return;
-        clearInterval(glitchInterval);
+        stopCipherGlitchAnimation();
+
+        currentGlitchOriginal = targetText;
         const glyphs = '01λ§0x#*¢∆µØ9876543210ABCDEF';
         const original = targetText;
-        const len = Math.min(original.length, 250);
+        // Scramble up to 1500 characters so all visible viewport content is deciphered
+        const len = Math.min(original.length, 1500);
         let iteration = 0;
-        const maxIter = 6;
+        // 24 frames @ 45ms ≈ 1.08 seconds for a visible, satisfying decryption wave
+        const maxIter = 24;
         
         glitchInterval = setInterval(() => {
             let scrambled = '';
+            const progress = iteration / maxIter;
+
             for (let i = 0; i < len; i++) {
-                if (original[i] === '\n' || original[i] === ' ') {
-                    scrambled += original[i];
-                } else if (i < (iteration / maxIter) * len) {
-                    scrambled += original[i];
+                const char = original[i];
+                if (char === '\n' || char === ' ' || char === '\t') {
+                    scrambled += char;
                 } else {
-                    scrambled += glyphs[Math.floor(Math.random() * glyphs.length)];
+                    const charPos = i / len;
+                    if (progress >= charPos + 0.12) {
+                        // Fully decrypted
+                        scrambled += char;
+                    } else if (progress >= charPos - 0.18) {
+                        // Decryption wavefront: rapid flicker between cyber glyph and real character
+                        if (Math.random() < 0.28) {
+                            scrambled += char;
+                        } else {
+                            scrambled += glyphs[Math.floor(Math.random() * glyphs.length)];
+                        }
+                    } else {
+                        // Encrypted ciphertext ahead of wavefront
+                        scrambled += glyphs[Math.floor(Math.random() * glyphs.length)];
+                    }
                 }
             }
-            editor.value = scrambled + original.substring(len);
+
+            if (editor) {
+                editor.value = scrambled + original.substring(len);
+            }
             iteration++;
+
             if (iteration > maxIter) {
                 clearInterval(glitchInterval);
-                editor.value = original;
+                glitchInterval = null;
+                if (editor) editor.value = original;
             }
-        }, 40);
+        }, 45);
     }
 
     // 3. --- Real-Time WPM & Momentum Gauge ---
@@ -3031,10 +3080,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (cid === myDeviceId) continue;
             const c = peerCursorsData[cid];
             if (!c) continue;
-            // Prune if inactive for more than 35 seconds
-            if (c.timestamp && (now - c.timestamp > 35000)) {
+            // Prune if inactive for more than 16 seconds and purge stale ghost records from cloud
+            if (c.timestamp && (now - c.timestamp > 16000)) {
                 removePeerCursor(cid);
                 delete peerCursorsData[cid];
+                if (db && currentToken && !isBurnMode) {
+                    try {
+                        const delPayload = {};
+                        delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
+                        db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
+                    } catch(e) {}
+                }
                 continue;
             }
             activeUsers.set(cid, {
@@ -3430,9 +3486,16 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 if (cid === myDeviceId) continue;
                                 let c = data.cursors[cid];
                                 if (!c) continue;
-                                if (c.timestamp && (now - c.timestamp > 35000)) {
+                                if (c.timestamp && (now - c.timestamp > 16000)) {
                                     removePeerCursor(cid);
                                     delete peerCursorsData[cid];
+                                    if (db && currentToken && !isBurnMode) {
+                                        try {
+                                            const delPayload = {};
+                                            delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
+                                            db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
+                                        } catch(e) {}
+                                    }
                                     continue;
                                 }
                                 const isNewPeer = !peerCursorsData[cid];
@@ -4014,9 +4077,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         const hasRemotePeers = Object.keys(peerCursorsData).length > 0;
         
         // Throttling:
-        // - Remote peers active: throttle cursor updates to once every 3.5 seconds
-        // - Alone in room: heartbeat update every 12 seconds to keep presence alive in document
-        const minInterval = hasRemotePeers ? 3500 : 12000;
+        // - Remote peers active: throttle cursor updates to once every 3 seconds
+        // - Alone in room: heartbeat update every 7 seconds to keep presence alive in document
+        const minInterval = hasRemotePeers ? 3000 : 7000;
         const elapsed = now - lastFirestoreCursorSync;
 
         if (!forceCloud && elapsed < minInterval) {
@@ -4890,6 +4953,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         try {
             const ctx = getAudioContext();
             if (!ctx) return;
+            if (ctx.state === 'suspended') {
+                ctx.resume().catch(() => {});
+            }
             const now = ctx.currentTime;
 
             // Tone 1: Crisp pleasant chime at 880Hz (A5)
@@ -5065,8 +5131,14 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
         for (let key in dmsObj) {
             if (key.includes(myDeviceId)) {
-                const parts = key.split('_');
-                const otherCid = parts[0] === myDeviceId ? parts[1] : parts[0];
+                let otherCid = null;
+                if (key.startsWith(myDeviceId + '_')) {
+                    otherCid = key.substring(myDeviceId.length + 1);
+                } else if (key.endsWith('_' + myDeviceId)) {
+                    otherCid = key.substring(0, key.length - myDeviceId.length - 1);
+                }
+                if (!otherCid) continue;
+
                 const msgs = dmsObj[key] || [];
                 const isChatActiveAndVisible = (activeChatId === otherCid && dmWindow && !dmWindow.classList.contains('hidden'));
 
@@ -6863,8 +6935,21 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const div = document.createElement('div');
             div.className = `cmd-item ${idx === cmdSelectedIndex ? 'active' : ''}`;
             div.innerHTML = `<span>${escapeHtml(cmd.name)}</span> <kbd style="font-size:0.7rem;padding:2px 5px;background:rgba(255,255,255,0.06);border-radius:4px;">${escapeHtml(cmd.shortcut || '')}</kbd>`;
-            div.onmouseenter = () => { cmdSelectedIndex = idx; renderCmdResults(filterText); };
-            div.onclick = () => { if (cmdPaletteModal) cmdPaletteModal.classList.add('hidden'); cmd.action(); };
+            div.onmouseenter = () => {
+                cmdSelectedIndex = idx;
+                const items = cmdResults ? cmdResults.querySelectorAll('.cmd-item') : [];
+                items.forEach((item, i) => item.classList.toggle('active', i === idx));
+            };
+            const executeCmdAction = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (cmdPaletteModal) cmdPaletteModal.classList.add('hidden');
+                setTimeout(() => {
+                    if (typeof cmd.action === 'function') cmd.action();
+                }, 20);
+            };
+            div.addEventListener('click', executeCmdAction);
+            div.addEventListener('touchend', executeCmdAction);
             cmdResults.appendChild(div);
         });
     }
@@ -6944,9 +7029,22 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         cmdInput.addEventListener('keydown', (e) => {
             const items = cmdResults ? cmdResults.querySelectorAll('.cmd-item') : [];
             if (items.length === 0) return;
-            if (e.key === 'ArrowDown') { e.preventDefault(); cmdSelectedIndex = (cmdSelectedIndex + 1) % items.length; renderCmdResults(cmdInput.value); }
-            if (e.key === 'ArrowUp') { e.preventDefault(); cmdSelectedIndex = (cmdSelectedIndex - 1 + items.length) % items.length; renderCmdResults(cmdInput.value); }
-            if (e.key === 'Enter') { e.preventDefault(); items[cmdSelectedIndex].click(); }
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                cmdSelectedIndex = (cmdSelectedIndex + 1) % items.length;
+                items.forEach((item, i) => item.classList.toggle('active', i === cmdSelectedIndex));
+                items[cmdSelectedIndex]?.scrollIntoView({ block: 'nearest' });
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                cmdSelectedIndex = (cmdSelectedIndex - 1 + items.length) % items.length;
+                items.forEach((item, i) => item.classList.toggle('active', i === cmdSelectedIndex));
+                items[cmdSelectedIndex]?.scrollIntoView({ block: 'nearest' });
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (items[cmdSelectedIndex]) items[cmdSelectedIndex].click();
+            }
         });
 
         cmdInput.addEventListener('input', (e) => {
