@@ -401,8 +401,8 @@
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
 
-    // v4.0 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.0 Pro
+    // v4.1 Pro Welcome Template
+    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.1 Pro
 
 Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
 Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
@@ -4164,9 +4164,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         editorMirror.style.borderRightWidth = style.borderRightWidth;
         editorMirror.style.borderBottomWidth = style.borderBottomWidth;
         editorMirror.style.borderLeftWidth = style.borderLeftWidth;
-        editorMirror.style.width = style.width;
-        editorMirror.style.boxSizing = style.boxSizing;
+        editorMirror.style.width = `${editor.clientWidth}px`;
+        editorMirror.style.boxSizing = 'border-box';
         editorMirror.style.whiteSpace = 'pre-wrap';
+        editorMirror.style.wordBreak = 'break-word';
         editorMirror.style.wordWrap = 'break-word';
         editorMirror.style.overflowWrap = 'break-word';
 
@@ -5975,13 +5976,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         const selStart = Math.min(editor.selectionStart || 0, editor.selectionEnd || 0);
         const selEnd = Math.max(editor.selectionStart || 0, editor.selectionEnd || 0);
 
-        // Find current paragraph / line boundaries
-        const prevNewline = val.lastIndexOf('\n', Math.max(0, selStart - 1));
-        const paraStart = prevNewline === -1 ? 0 : prevNewline + 1;
-        const nextNewline = val.indexOf('\n', selEnd);
-        const paraEnd = nextNewline === -1 ? val.length : nextNewline;
-
-        // Replication of editor styling to mirror
+        // Replication of editor styling to mirror with exact inner client width
         const style = window.getComputedStyle(editor);
         editorMirror.style.fontFamily = style.fontFamily;
         editorMirror.style.fontSize = style.fontSize;
@@ -5998,39 +5993,40 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         editorMirror.style.borderRightWidth = style.borderRightWidth;
         editorMirror.style.borderBottomWidth = style.borderBottomWidth;
         editorMirror.style.borderLeftWidth = style.borderLeftWidth;
-        editorMirror.style.width = style.width;
-        editorMirror.style.boxSizing = style.boxSizing;
+        // Use clientWidth so text wraps at exact same column as textarea (handles scrollbars perfectly)
+        editorMirror.style.width = `${editor.clientWidth}px`;
+        editorMirror.style.boxSizing = 'border-box';
         editorMirror.style.whiteSpace = 'pre-wrap';
+        editorMirror.style.wordBreak = 'break-word';
         editorMirror.style.wordWrap = 'break-word';
         editorMirror.style.overflowWrap = 'break-word';
 
         editorMirror.innerHTML = '';
 
-        const textBefore = val.substring(0, paraStart);
+        // Target the active typing line where the cursor sits (or selection span)
+        const textBefore = val.substring(0, selStart);
         if (textBefore) {
             editorMirror.appendChild(document.createTextNode(textBefore));
         }
 
         const startMarker = document.createElement('span');
-        const startChar = val.charAt(paraStart);
+        const startChar = val.charAt(selStart);
         startMarker.textContent = (startChar && startChar !== '\n') ? startChar : '\u200B';
         editorMirror.appendChild(startMarker);
 
-        const endMarker = document.createElement('span');
-        if (paraEnd > paraStart + 1) {
-            const middle = val.substring(paraStart + 1, paraEnd - 1);
+        let endMarker = startMarker;
+        if (selEnd > selStart) {
+            const middle = val.substring(selStart, selEnd);
             if (middle) editorMirror.appendChild(document.createTextNode(middle));
-            const endChar = val.charAt(paraEnd - 1);
+            endMarker = document.createElement('span');
+            const endChar = val.charAt(selEnd);
             endMarker.textContent = (endChar && endChar !== '\n') ? endChar : '\u200B';
-            editorMirror.appendChild(endMarker);
-        } else {
-            endMarker.textContent = '\u200B';
             editorMirror.appendChild(endMarker);
         }
 
         const lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.7) || 28;
         const top = startMarker.offsetTop - editor.scrollTop;
-        const endTop = (paraEnd > paraStart + 1) ? (endMarker.offsetTop - editor.scrollTop) : top;
+        const endTop = (selEnd > selStart) ? (endMarker.offsetTop - editor.scrollTop) : top;
         const height = Math.max(lineHeight, (endTop - top) + lineHeight);
 
         return { top, height, paddingLeft: parseFloat(style.paddingLeft) || 36 };
@@ -7853,9 +7849,20 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     const cardWatermarkCheck = document.getElementById('card-watermark-check');
     const cardCopyImgBtn = document.getElementById('card-copy-img-btn');
     const cardDownloadPngBtn = document.getElementById('card-download-png-btn');
+    const cardDownloadAllBtn = document.getElementById('card-download-all-btn');
+    const cardDownloadTxtBtn = document.getElementById('card-download-txt-btn');
+    const cardDownloadMdBtn = document.getElementById('card-download-md-btn');
+    const cardPaginationBar = document.getElementById('card-pagination-bar');
+    const cardPrevPageBtn = document.getElementById('card-prev-page-btn');
+    const cardNextPageBtn = document.getElementById('card-next-page-btn');
+    const cardPageIndicator = document.getElementById('card-page-indicator');
     const cardThemeButtons = document.querySelectorAll('.card-theme-btn');
+    const cardFormatButtons = document.querySelectorAll('.card-format-btn');
 
     let currentCardTheme = 'cyber';
+    let currentCardFormat = 'code'; // 'code' or 'markdown'
+    let currentCardPage = 0;
+    let cardTotalPages = 1;
 
     const CARD_THEMES = {
         cyber: {
@@ -7910,12 +7917,13 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         }
     };
 
-    function renderNoteCard() {
-        if (!cardRenderCanvas) return;
-        const ctx = cardRenderCanvas.getContext('2d');
+    function renderCardToCanvas(targetCanvas, pageIndex = currentCardPage) {
+        if (!targetCanvas) return;
+        const ctx = targetCanvas.getContext('2d');
         const theme = CARD_THEMES[currentCardTheme] || CARD_THEMES.cyber;
         const baseFontSize = parseInt(cardFontSizeSelect ? cardFontSizeSelect.value : 20, 10);
         const showWatermark = cardWatermarkCheck ? cardWatermarkCheck.checked : true;
+        const formatMode = currentCardFormat || 'code';
 
         const isDraw = activeTabId && tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
         const rawText = isDraw ? "/* QuickPad Whiteboard Drawing Tab */" : (editor ? editor.value : "");
@@ -7929,52 +7937,97 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         const lineHeight = Math.round(baseFontSize * 1.55) * scale;
         const fontSizePx = baseFontSize * scale;
 
-        ctx.font = `${fontSizePx}px "Fira Code", monospace`;
-        const maxTextWidth = width - (padding * 2) - (cardPadding * 2) - (50 * scale);
-        const wrappedLines = [];
+        const maxTextWidth = width - (padding * 2) - (cardPadding * 2) - (formatMode === 'code' ? (50 * scale) : (20 * scale));
+        const allWrappedLines = [];
 
-        const maxInputLines = Math.min(lines.length, 50);
-        for (let i = 0; i < maxInputLines; i++) {
-            const line = lines[i];
+        ctx.font = formatMode === 'markdown' 
+            ? `${fontSizePx}px "Inter", -apple-system, sans-serif`
+            : `${fontSizePx}px "Fira Code", monospace`;
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+
+            // In markdown mode: clean out raw <mark...> tags so text looks crisp and readable
+            if (formatMode === 'markdown') {
+                line = line
+                    .replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, '$1')
+                    .replace(/==([^=\n\r]+)==/g, '$1');
+            }
+
             if (line.length === 0) {
-                wrappedLines.push({ text: '', lineNum: i + 1 });
+                allWrappedLines.push({ text: '', lineNum: i + 1, isBlank: true });
                 continue;
             }
+
             let currentLine = '';
             for (let char of line) {
                 const testLine = currentLine + char;
                 if (ctx.measureText(testLine).width > maxTextWidth) {
-                    wrappedLines.push({ text: currentLine, lineNum: currentLine === '' ? i + 1 : null });
+                    allWrappedLines.push({ text: currentLine, lineNum: currentLine === '' ? i + 1 : null, isBlank: false });
                     currentLine = char;
                 } else {
                     currentLine = testLine;
                 }
             }
             if (currentLine) {
-                wrappedLines.push({ text: currentLine, lineNum: wrappedLines.length === 0 || wrappedLines[wrappedLines.length - 1].lineNum === null ? i + 1 : null });
+                allWrappedLines.push({ text: currentLine, lineNum: allWrappedLines.length === 0 || allWrappedLines[allWrappedLines.length - 1].lineNum === null ? i + 1 : null, isBlank: false });
             }
-            if (wrappedLines.length > 55) break;
         }
 
-        if (lines.length > maxInputLines || wrappedLines.length > 55) {
-            wrappedLines.push({ text: `... (${lines.length - maxInputLines} more lines)`, lineNum: null });
+        if (allWrappedLines.length === 0) {
+            allWrappedLines.push({ text: '', lineNum: 1, isBlank: true });
+        }
+
+        // Dynamically calculate lines per card page based on font size
+        const linesPerPage = baseFontSize >= 24 ? 28 : (baseFontSize >= 20 ? 36 : 44);
+        cardTotalPages = Math.max(1, Math.ceil(allWrappedLines.length / linesPerPage));
+
+        pageIndex = Math.max(0, Math.min(pageIndex, cardTotalPages - 1));
+        if (targetCanvas === cardRenderCanvas) {
+            currentCardPage = pageIndex;
+        }
+
+        const pageLines = allWrappedLines.slice(pageIndex * linesPerPage, (pageIndex + 1) * linesPerPage);
+
+        // Update modal UI indicators when rendering the preview canvas
+        if (targetCanvas === cardRenderCanvas) {
+            if (cardTotalPages > 1) {
+                if (cardPaginationBar) cardPaginationBar.classList.remove('hidden');
+                if (cardPageIndicator) cardPageIndicator.textContent = `Part ${currentCardPage + 1} of ${cardTotalPages}`;
+                if (cardPrevPageBtn) cardPrevPageBtn.disabled = currentCardPage === 0;
+                if (cardNextPageBtn) cardNextPageBtn.disabled = currentCardPage === cardTotalPages - 1;
+                if (cardDownloadPngBtn) {
+                    cardDownloadPngBtn.classList.remove('hidden');
+                    cardDownloadPngBtn.textContent = `📥 Download Part ${currentCardPage + 1} (PNG)`;
+                }
+                if (cardDownloadAllBtn) {
+                    cardDownloadAllBtn.textContent = `📥 Download All (${cardTotalPages} PNGs)`;
+                }
+            } else {
+                if (cardPaginationBar) cardPaginationBar.classList.add('hidden');
+                if (cardDownloadPngBtn) cardDownloadPngBtn.classList.add('hidden');
+                if (cardDownloadAllBtn) cardDownloadAllBtn.textContent = `📥 Download PNG Card`;
+            }
         }
 
         const titleBarHeight = 44 * scale;
-        const footerHeight = showWatermark ? (36 * scale) : (16 * scale);
-        const cardContentHeight = Math.max(160 * scale, wrappedLines.length * lineHeight + (20 * scale));
+        const textTopPadding = Math.max(28 * scale, Math.round(fontSizePx * 1.15));
+        const footerHeight = showWatermark ? (36 * scale) : (18 * scale);
+        const cardContentHeight = Math.max(160 * scale, textTopPadding + (pageLines.length * lineHeight) + (16 * scale));
         const cardHeight = titleBarHeight + cardContentHeight + footerHeight;
         const height = cardHeight + (padding * 2);
 
-        cardRenderCanvas.width = width;
-        cardRenderCanvas.height = height;
+        targetCanvas.width = width;
+        targetCanvas.height = height;
 
+        // Background Gradient
         const bgGrad = ctx.createLinearGradient(0, 0, width, height);
         bgGrad.addColorStop(0, theme.bgGrad1);
         bgGrad.addColorStop(1, theme.bgGrad2);
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, width, height);
 
+        // Radial Center Glow
         const glowRad = ctx.createRadialGradient(width / 2, height / 2, 80 * scale, width / 2, height / 2, width / 1.5);
         glowRad.addColorStop(0, theme.cardGlow);
         glowRad.addColorStop(1, 'transparent');
@@ -7987,6 +8040,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         const cardH = cardHeight;
         const cardRadius = 16 * scale;
 
+        // Drop Shadow
         ctx.save();
         ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
         ctx.shadowBlur = 40 * scale;
@@ -8011,11 +8065,13 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         ctx.fill();
         ctx.restore();
 
+        // Card Border
         roundRect(ctx, cardX, cardY, cardW, cardH, cardRadius);
         ctx.strokeStyle = theme.cardBorder;
         ctx.lineWidth = 1.5 * scale;
         ctx.stroke();
 
+        // Traffic Light Window Dots
         const dotY = cardY + (22 * scale);
         const dotR = 6 * scale;
         const dotSpacing = 18 * scale;
@@ -8029,11 +8085,14 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             ctx.fill();
         });
 
+        // Window Title & Page Indicator
         ctx.fillStyle = theme.textTitle;
         ctx.font = `600 ${14 * scale}px "Inter", sans-serif`;
         ctx.textAlign = 'center';
-        ctx.fillText(tabTitle, cardX + (cardW / 2), dotY + (5 * scale));
+        const pageTitleSuffix = cardTotalPages > 1 ? ` (Part ${pageIndex + 1}/${cardTotalPages})` : '';
+        ctx.fillText(tabTitle + pageTitleSuffix, cardX + (cardW / 2), dotY + (5 * scale));
 
+        // Window Header Divider
         ctx.beginPath();
         ctx.moveTo(cardX, cardY + titleBarHeight);
         ctx.lineTo(cardX + cardW, cardY + titleBarHeight);
@@ -8041,38 +8100,109 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         ctx.lineWidth = 1 * scale;
         ctx.stroke();
 
+        // Text Content Rendering
         ctx.textAlign = 'left';
-        let currentY = cardY + titleBarHeight + (26 * scale);
-        const textStartX = cardX + (28 * scale) + (36 * scale);
+        ctx.textBaseline = 'alphabetic';
+        let currentY = cardY + titleBarHeight + textTopPadding;
 
-        wrappedLines.forEach((item) => {
-            if (item.lineNum !== null) {
-                ctx.fillStyle = theme.lineNums;
-                ctx.font = `500 ${fontSizePx * 0.85}px "Fira Code", monospace`;
-                ctx.textAlign = 'right';
-                ctx.fillText(String(item.lineNum), textStartX - (14 * scale), currentY);
-            }
+        if (formatMode === 'code') {
+            const textStartX = cardX + (28 * scale) + (36 * scale);
 
-            ctx.textAlign = 'left';
-            ctx.fillStyle = theme.textPrimary;
-            ctx.font = `${fontSizePx}px "Fira Code", monospace`;
-            ctx.fillText(item.text, textStartX, currentY);
+            pageLines.forEach((item) => {
+                if (item.lineNum !== null) {
+                    ctx.fillStyle = theme.lineNums;
+                    ctx.font = `500 ${fontSizePx * 0.85}px "Fira Code", monospace`;
+                    ctx.textAlign = 'right';
+                    ctx.fillText(String(item.lineNum), textStartX - (14 * scale), currentY);
+                }
 
-            currentY += lineHeight;
-        });
+                ctx.textAlign = 'left';
+                ctx.fillStyle = theme.textPrimary;
+                ctx.font = `${fontSizePx}px "Fira Code", monospace`;
+                ctx.fillText(item.text, textStartX, currentY);
 
+                currentY += lineHeight;
+            });
+        } else {
+            // Rendered Markdown Mode
+            const textStartX = cardX + (36 * scale);
+
+            pageLines.forEach((item) => {
+                ctx.textAlign = 'left';
+                const text = item.text;
+
+                if (text.startsWith('# ')) {
+                    ctx.font = `bold ${fontSizePx * 1.3}px "Inter", sans-serif`;
+                    ctx.fillStyle = theme.textTitle;
+                    ctx.fillText(text.replace(/^#\s+/, ''), textStartX, currentY);
+                } else if (text.startsWith('## ')) {
+                    ctx.font = `600 ${fontSizePx * 1.15}px "Inter", sans-serif`;
+                    ctx.fillStyle = theme.textTitle;
+                    ctx.fillText(text.replace(/^##\s+/, ''), textStartX, currentY);
+                } else if (text.startsWith('### ')) {
+                    ctx.font = `600 ${fontSizePx * 1.05}px "Inter", sans-serif`;
+                    ctx.fillStyle = theme.textTitle;
+                    ctx.fillText(text.replace(/^###\s+/, ''), textStartX, currentY);
+                } else if (text.startsWith('> ')) {
+                    // Blockquote accent line
+                    ctx.fillStyle = theme.cardBorder;
+                    ctx.fillRect(textStartX, currentY - (lineHeight * 0.7), 3 * scale, lineHeight * 0.9);
+                    ctx.font = `italic ${fontSizePx * 0.95}px "Inter", sans-serif`;
+                    ctx.fillStyle = theme.textPrimary;
+                    ctx.fillText(text.replace(/^>\s*/, ''), textStartX + (14 * scale), currentY);
+                } else if (/^[-*]\s*\[([ xX])\]\s*(.*)/.test(text)) {
+                    // Checklist item
+                    const m = text.match(/^[-*]\s*\[([ xX])\]\s*(.*)/);
+                    const isChecked = m[1].toLowerCase() === 'x';
+                    ctx.font = `bold ${fontSizePx * 0.9}px "Inter", sans-serif`;
+                    ctx.fillStyle = isChecked ? theme.textTitle : theme.lineNums;
+                    ctx.fillText(isChecked ? '☑' : '☐', textStartX, currentY);
+                    ctx.font = `${fontSizePx}px "Inter", sans-serif`;
+                    ctx.fillStyle = isChecked ? 'rgba(255,255,255,0.65)' : theme.textPrimary;
+                    ctx.fillText(m[2], textStartX + (22 * scale), currentY);
+                } else if (/^[-*]\s+(.*)/.test(text)) {
+                    // Bullet list
+                    ctx.font = `bold ${fontSizePx}px "Inter", sans-serif`;
+                    ctx.fillStyle = theme.textTitle;
+                    ctx.fillText('•', textStartX, currentY);
+                    ctx.font = `${fontSizePx}px "Inter", sans-serif`;
+                    ctx.fillStyle = theme.textPrimary;
+                    ctx.fillText(text.replace(/^[-*]\s+/, ''), textStartX + (16 * scale), currentY);
+                } else {
+                    // Regular paragraph text
+                    ctx.font = `${fontSizePx}px "Inter", sans-serif`;
+                    ctx.fillStyle = theme.textPrimary;
+                    ctx.fillText(text, textStartX, currentY);
+                }
+
+                currentY += lineHeight;
+            });
+        }
+
+        // Watermark Footer
         if (showWatermark) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
             ctx.font = `500 ${12 * scale}px "Inter", sans-serif`;
             ctx.textAlign = 'right';
-            ctx.fillText('⚡ QuickPad • Zero-Knowledge E2EE • quickpad.org', cardX + cardW - (20 * scale), cardY + cardH - (14 * scale));
+            const partString = cardTotalPages > 1 ? ` • Part ${pageIndex + 1} of ${cardTotalPages}` : '';
+            ctx.fillText(`⚡ QuickPad${partString} • Zero-Knowledge E2EE • quickpad.org`, cardX + cardW - (20 * scale), cardY + cardH - (14 * scale));
         }
+    }
+
+    function renderNoteCard() {
+        if (!cardRenderCanvas) return;
+        renderCardToCanvas(cardRenderCanvas, currentCardPage);
+        const wrapper = document.querySelector('.card-preview-wrapper');
+        if (wrapper) wrapper.scrollTop = 0;
     }
 
     function openCardExportModal() {
         if (!cardExportModal) return;
+        currentCardPage = 0;
         renderNoteCard();
         cardExportModal.classList.remove('hidden');
+        const wrapper = document.querySelector('.card-preview-wrapper');
+        if (wrapper) wrapper.scrollTop = 0;
     }
 
     function initCardExporter() {
@@ -8090,18 +8220,111 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             });
         });
 
+        cardFormatButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                cardFormatButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentCardFormat = btn.getAttribute('data-card-format') || 'code';
+                renderNoteCard();
+            });
+        });
+
+        // Pager buttons for multi-part cards
+        if (cardPrevPageBtn) {
+            cardPrevPageBtn.addEventListener('click', () => {
+                if (currentCardPage > 0) {
+                    currentCardPage--;
+                    renderNoteCard();
+                }
+            });
+        }
+
+        if (cardNextPageBtn) {
+            cardNextPageBtn.addEventListener('click', () => {
+                if (currentCardPage < cardTotalPages - 1) {
+                    currentCardPage++;
+                    renderNoteCard();
+                }
+            });
+        }
+
+        // Download Single/Current PNG
         if (cardDownloadPngBtn) {
             cardDownloadPngBtn.addEventListener('click', () => {
                 if (!cardRenderCanvas) return;
                 const tabName = (tabsData[activeTabId] ? tabsData[activeTabId].name : 'note').replace(/\.[^/.]+$/, "");
+                const partSuffix = cardTotalPages > 1 ? `-part-${currentCardPage + 1}-of-${cardTotalPages}` : '-card';
                 const link = document.createElement('a');
-                link.download = `quickpad-${tabName}-card.png`;
+                link.download = `quickpad-${tabName}${partSuffix}.png`;
                 link.href = cardRenderCanvas.toDataURL('image/png');
+                document.body.appendChild(link);
                 link.click();
-                showToast("📥 Card downloaded as PNG!", 'success');
+                document.body.removeChild(link);
+                showToast(`📥 Card Part ${currentCardPage + 1} downloaded as PNG!`, 'success');
             });
         }
 
+        // Download All PNG Cards (Splits into multiple files without cutoff)
+        if (cardDownloadAllBtn) {
+            cardDownloadAllBtn.addEventListener('click', async () => {
+                if (!cardRenderCanvas) return;
+                const tabName = (tabsData[activeTabId] ? tabsData[activeTabId].name : 'note').replace(/\.[^/.]+$/, "");
+
+                if (cardTotalPages <= 1) {
+                    const link = document.createElement('a');
+                    link.download = `quickpad-${tabName}-card.png`;
+                    link.href = cardRenderCanvas.toDataURL('image/png');
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    showToast("📥 Card downloaded as PNG!", 'success');
+                    return;
+                }
+
+                showToast(`⏳ Generating all ${cardTotalPages} PNG card parts...`, 'info');
+                const exportCanvas = document.createElement('canvas');
+
+                for (let p = 0; p < cardTotalPages; p++) {
+                    renderCardToCanvas(exportCanvas, p);
+                    const dataUrl = exportCanvas.toDataURL('image/png');
+                    const link = document.createElement('a');
+                    link.download = `quickpad-${tabName}-part-${p + 1}-of-${cardTotalPages}.png`;
+                    link.href = dataUrl;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    await new Promise(res => setTimeout(res, 220));
+                }
+
+                showToast(`📥 All ${cardTotalPages} PNG card files downloaded!`, 'success');
+            });
+        }
+
+        // Download Note as Plain Text (.txt) directly from Card Modal
+        if (cardDownloadTxtBtn) {
+            cardDownloadTxtBtn.addEventListener('click', () => {
+                const tab = tabsData[activeTabId] || { name: 'note.txt' };
+                const fname = tab.name.endsWith('.txt') ? tab.name : `${tab.name.replace(/\.[^/.]+$/, "")}.txt`;
+                if (editor) {
+                    downloadFile(fname, editor.value, 'text/plain');
+                    showToast(`📄 Downloaded note as ${fname}!`, 'success');
+                }
+            });
+        }
+
+        // Download Note as Markdown (.md) directly from Card Modal
+        if (cardDownloadMdBtn) {
+            cardDownloadMdBtn.addEventListener('click', () => {
+                const tab = tabsData[activeTabId] || { name: 'note.md' };
+                const fname = tab.name.endsWith('.md') ? tab.name : `${tab.name.replace(/\.[^/.]+$/, "")}.md`;
+                if (editor) {
+                    downloadFile(fname, editor.value, 'text/markdown');
+                    showToast(`📝 Downloaded note as ${fname}!`, 'success');
+                }
+            });
+        }
+
+        // Copy Card Image to Clipboard
         if (cardCopyImgBtn) {
             cardCopyImgBtn.addEventListener('click', async () => {
                 if (!cardRenderCanvas) return;
@@ -8111,7 +8334,8 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                         await navigator.clipboard.write([
                             new ClipboardItem({ 'image/png': blob })
                         ]);
-                        showToast("📋 Card image copied to clipboard!", 'success');
+                        const partMsg = cardTotalPages > 1 ? ` (Part ${currentCardPage + 1})` : '';
+                        showToast(`📋 Card image${partMsg} copied to clipboard!`, 'success');
                     });
                 } catch(e) {
                     showToast("Clipboard copy failed: " + e.message, 'error');

@@ -823,6 +823,8 @@ body, html {
     font-size: var(--editor-font-size);
     line-height: 1.7;
     font-family: var(--editor-font);
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 #editor, #editor-mirror {
@@ -4236,6 +4238,58 @@ body.focus-mode .focus-line-indicator {
     cursor: pointer;
 }
 
+.card-format-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.card-format-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.card-format-btn:hover {
+    border-color: var(--primary-color);
+    color: #fff;
+}
+
+.card-format-btn.active {
+    background: rgba(0, 255, 249, 0.15);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.card-pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 6px;
+    border: 1px solid rgba(0, 255, 249, 0.2);
+}
+
+.card-pagination-bar.hidden {
+    display: none !important;
+}
+
+.card-page-indicator {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    font-family: var(--font-mono, monospace);
+    letter-spacing: 0.5px;
+}
+
 .card-preview-wrapper {
     width: 100%;
     max-height: 480px;
@@ -4246,7 +4300,7 @@ body.focus-mode .focus-line-indicator {
     padding: 16px;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 16px;
     box-sizing: border-box;
 }
@@ -4257,12 +4311,15 @@ body.focus-mode .focus-line-indicator {
     border-radius: 8px;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
     display: block;
+    margin: 0 auto;
 }
 
 .card-modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 /* Locked Tab Vault Screen */
