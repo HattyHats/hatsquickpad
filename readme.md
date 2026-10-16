@@ -1,4 +1,4 @@
-# QuickPad ⚡ (v4.1 Pro — Zero-Knowledge Real-Time Scratchpad)
+# QuickPad ⚡ (v4.2 Pro — Zero-Knowledge Real-Time Scratchpad)
 
 QuickPad is a hyper-fast, serverless, real-time scratchpad engineered for absolute privacy and frictionless productivity. Designed to eliminate the bloat of modern note-taking: **no logins, no accounts, no tracking cookies, and no data harvesting**. You open the link, type, sketch, format, and collaborate.
 
@@ -8,7 +8,7 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 ---
 
-## ✨ What's New in Version 4.1 Pro
+## ✨ What's New in Version 4.2 Pro
 
 - 🖍️ **Multi-Color Text Highlighting:** Highlight selected text with a custom 10-color quick palette (Yellow, Lime, Green, Teal, Cyan, Pink, Coral, Orange, Purple, Silver) with one-click clear support directly from the floating formatting toolbar.
 - 🖼️ **Multi-Part Long Note PNG Export:** Long notes are now automatically paginated into elegant multi-part card images with prev/next navigation, individual part download, and a "Download All PNGs" batch export.

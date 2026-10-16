@@ -401,8 +401,8 @@
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
 
-    // v4.1 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.1 Pro
+    // v4.2 Pro Welcome Template
+    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.2 Pro
 
 Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
 Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
@@ -3777,15 +3777,26 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     committed = true;
                     const val = input.value.trim();
                     if (val && val !== oldName) {
+                        const wasDraw = oldName.endsWith('.draw');
+                        const nowDraw = val.endsWith('.draw');
                         tabsData[tid].name = val;
+                        if (wasDraw !== nowDraw) {
+                            tabsData[tid].content = '';
+                        }
                         tabsContentDirty = true;
                         broadcastLocalSync({
                             type: 'tabs_structure',
                             tabs: tabsData,
                             senderId: myDeviceId
                         });
-                        saveWorkspace();
+                        if (tid === activeTabId && wasDraw !== nowDraw) {
+                            switchTab(tid);
+                        } else {
+                            saveWorkspace();
+                            renderTabs();
+                        }
                         showToast(`Renamed tab to "${val}"`, 'success');
+                        return;
                     }
                     renderTabs();
                 };
@@ -4354,7 +4365,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             debounceTimeout = setTimeout(saveWorkspace, 1200);
         });
 
+        ['mousedown', 'beforeinput', 'paste', 'drop'].forEach(evt => {
+            editor.addEventListener(evt, () => {
+                if (glitchInterval) stopCipherGlitchAnimation();
+            });
+        });
+
         editor.addEventListener('keydown', (e) => {
+            if (glitchInterval) stopCipherGlitchAnimation();
             const keyType = e.key === ' ' ? 'space' : (e.key === 'Enter' ? 'enter' : (e.key === 'Backspace' ? 'backspace' : 'key'));
             playMechanicalSound(keyType);
 
@@ -6055,6 +6073,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         document.body.classList.toggle('focus-mode', isFocusMode);
         if (focusToggleBtn) focusToggleBtn.classList.toggle('active', isFocusMode);
         if (isFocusMode) {
+            if (editor && editor.style.display !== 'none' && !isMarkdown) {
+                editor.focus();
+            }
             updateFocusDimming();
             showToast("🎯 Focus Dimming Active", 'info');
         } else {
@@ -7826,11 +7847,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         }
         if (hudPomodoroTime) {
             hudPomodoroTime.style.cursor = 'pointer';
-            hudPomodoroTime.addEventListener('click', promptCustomPomodoroDuration);
         }
         if (hudPomodoroIcon) {
             hudPomodoroIcon.style.cursor = 'pointer';
-            hudPomodoroIcon.addEventListener('click', promptCustomPomodoroDuration);
         }
         if (hudPomodoroContainer) {
             hudPomodoroContainer.addEventListener('click', (e) => {
@@ -8198,6 +8217,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
     function openCardExportModal() {
         if (!cardExportModal) return;
+        if (glitchInterval) stopCipherGlitchAnimation();
         currentCardPage = 0;
         renderNoteCard();
         cardExportModal.classList.remove('hidden');
