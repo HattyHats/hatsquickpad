@@ -20,7 +20,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=79">
+    <link rel="stylesheet" href="style.css?v=82">
     
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -708,6 +708,13 @@
             <div class="feature-section-title sec-header">🛡️ Cryptographic Security Architecture</div>
             <p class="info-sec-desc">All workspace content is encrypted locally using <strong>AES-256 (CBC)</strong> prior to transport. The database only acts as an encrypted relay and stores ciphertext. Direct messages utilize <strong>RSA-OAEP 2048-bit with SHA-256</strong> with hybrid AES session keys generated on device. No unencrypted content ever touches the wire.</p>
             
+            <div class="feature-section-title sec-header">☕ Keeping QuickPad Free &amp; Sustainable</div>
+            <p class="info-sec-desc">QuickPad is 100% free with no paywalls or required accounts. To help cover real-time sync relays and server costs, a small, unobtrusive corner banner is displayed.</p>
+            <ul class="feature-list" style="margin-top: 8px;">
+                <li>🔒 <strong>Zero Privacy Impact:</strong> Your AES-256 encryption keys live exclusively in the URL hash fragment (<code>#</code>). Under web standard <strong>RFC 3986 §3.5</strong>, browsers never transmit hash fragments over network requests. Your notes remain 100% end-to-end encrypted and unreadable to third parties.</li>
+                <li>🌐 <strong>Ad-Blocker &amp; VPN Friendly:</strong> You are always in control of your browser. If you prefer to bypass ads using an ad-blocker or VPN, QuickPad will always work seamlessly. We will never show annoying anti-adblock walls.</li>
+            </ul>
+
             <div class="info-footer">
                 Information should be free. Build things that empower people.
             </div>
@@ -1273,7 +1280,7 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=79"></script>
+    <script src="app.js?v=82"></script>
     <script>
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             let refreshing = false;
@@ -1295,5 +1302,8 @@
             });
         }
     </script>
+
+    <!-- Corner Ads Integration -->
+    <script src="https://cdn.apitiny.net/scripts/v2.0/main.js" data-site-id="6ad549b883f2058a67c6a720" data-test-mode="true" async></script>
 </body>
 </html>

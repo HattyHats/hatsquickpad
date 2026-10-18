@@ -4415,4 +4415,9 @@ body.focus-mode .focus-line-indicator {
     animation: shake 0.4s ease-in-out;
 }
 
+/* --- Corner Ads Positioning (Keep HUD bar accessible) --- */
+.tinyadz-iframe, [id^="widget"][id*="corner"] {
+    bottom: 34px !important;
+}
+
 
