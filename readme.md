@@ -156,12 +156,12 @@ QuickPad is a static PWA (Progressive Web App). There is no Node.js build step o
 
 ---
 
-## ☕ Sustainability & Privacy Guarantee
+## ☕ 100% Free, Private & Open
 
-QuickPad is completely free with no paywalls or subscriptions. To help cover database relays, WebRTC signaling, and server infrastructure costs, small, unobtrusive corner banners are displayed.
+QuickPad is completely free with no paywalls, subscriptions, tracking cookies, or ads.
 
-* 🔒 **Zero Compromise on Encryption:** QuickPad's core encryption keys reside strictly in the client-side URL hash fragment (`#`). Per internet standard **RFC 3986 §3.5**, browsers never send URL hashes to any third-party or network server. Your plaintext notes never leave your device unencrypted.
-* 🌐 **Ad-Blocker & VPN Friendly:** You have total control over your browsing experience. If you use a VPN or an ad-blocker (such as uBlock Origin or Brave Shields) to bypass ads, QuickPad will always work seamlessly. We will never use anti-adblock detection or paywall your notes.
+* 🔒 **Zero-Knowledge by Design:** Encryption keys reside strictly in the client-side URL hash fragment (`#`). Per internet standard **RFC 3986 §3.5**, browsers never send URL hashes to any server. Your plaintext notes never leave your device unencrypted.
+* 🛡️ **Zero Tracking or Telemetry:** No third-party ad networks, no data harvesting, and no trackers. Pure, untracked productivity.
 
 ---
 

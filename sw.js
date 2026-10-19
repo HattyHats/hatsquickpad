@@ -1,4 +1,4 @@
-const CACHE_NAME = 'quickpad-v83';
+const CACHE_NAME = 'quickpad-v85';
 const ASSETS = [
   './',
   './index.html',
@@ -34,13 +34,12 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith('http')) return;
 
-  // Let external APIs, ads, and database endpoints pass directly to the network
+  // Let external APIs and database endpoints pass directly to the network
   const url = event.request.url;
   if (url.includes('firestore.googleapis.com') || 
       url.includes('firebaseio.com') ||
       url.includes('googleapis.com') ||
-      url.includes('api.qrserver.com') ||
-      url.includes('apitiny.net')) {
+      url.includes('api.qrserver.com')) {
     return;
   }
 
