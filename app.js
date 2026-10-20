@@ -182,6 +182,9 @@
     const exportHtmlBtn = document.getElementById('export-html-btn');
     const importFileBtn = document.getElementById('import-file-btn');
     const fileImportInput = document.getElementById('file-import-input');
+    const exampleGuideBtn = document.getElementById('example-guide-btn');
+    const fileExampleGuideBtn = document.getElementById('file-example-guide-btn');
+    const aboutOpenGuideBtn = document.getElementById('about-open-guide-btn');
 
     // --- Stealth & Security Elements ---
     const panicBtn = document.getElementById('panic-btn');
@@ -401,22 +404,24 @@
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
 
-    // v4.2 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.2 Pro
+    // v4.3 Pro Welcome Template
+    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.3 Pro
 
 Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
 Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
 
 ### 🚀 Getting Started Checklist
 - [x] Create a private workspace (You're here!)
+- [ ] Upload or drag & drop documents (.docx Word, .pdf, .txt, .md, code)
 - [ ] Try formatting text with the floating toolbar (Highlight any text)
-- [ ] Start a Pomodoro focus sprint with the 🍅 timer in the HUD
+- [ ] Start a Pomodoro focus sprint with the 🍅 timer in the bottom HUD
 - [ ] Export a beautiful image card from File -> Export Note as Image Card
 - [ ] Inspect your encryption live with the 🛡️ Shield button in the header
 - [ ] Share your note or create a password-protected link via 🔗 Share
 
 ### 💡 Pro Tips & Shortcuts
-- **⚡ Command Palette:** Press \`Cmd+K\` (or \`Ctrl+K\`) for instant actions.
+- **⚡ Command Palette:** Press \`Cmd+K\` (or \`Ctrl+K\`) for instant actions and recent notes.
+- **📄 Document Upload:** Upload or drag & drop Word documents (\`.docx\`), PDFs, Markdown, text, and code files to edit them directly.
 - **🎨 Markdown Preview:** Press \`Alt+M\` (or \`Alt+S\` for Split View).
 - **🎨 Whiteboard:** Add a new tab ending in \`.draw\` (e.g. \`sketch.draw\`) for real-time drawing.
 - **🔒 Secret Vault:** Right-click or lock any tab with a passphrase for nested privacy.
@@ -2816,11 +2821,23 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             } else if (padParam) {
                 rawToken = padParam;
                 window.history.replaceState({}, '', `#${rawToken}`);
-            } else if (window.location.hash) {
+                try { localStorage.setItem('quickpad_last_active_hash', rawToken); } catch(e){}
+            } else if (window.location.hash && window.location.hash.length > 1) {
                 rawToken = window.location.hash.substring(1);
+                try { localStorage.setItem('quickpad_last_active_hash', rawToken); } catch(e){}
             } else {
-                rawToken = generateToken();
-                window.history.replaceState({}, '', `#${rawToken}`);
+                // When opened without a hash (e.g. Chrome App / PWA launch from dock or desktop),
+                // resume the user's active note from their previous session
+                let lastSavedHash = null;
+                try { lastSavedHash = localStorage.getItem('quickpad_last_active_hash'); } catch(e){}
+                if (lastSavedHash && lastSavedHash.trim().length > 3) {
+                    rawToken = lastSavedHash.trim();
+                    window.history.replaceState({}, '', `#${rawToken}`);
+                } else {
+                    rawToken = generateToken();
+                    window.history.replaceState({}, '', `#${rawToken}`);
+                    try { localStorage.setItem('quickpad_last_active_hash', rawToken); } catch(e){}
+                }
             }
 
             const isProtectedReadOnly = viewParam && (urlParams.get('protected') === '1' || urlParams.get('pin') === '1');
@@ -2859,11 +2876,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 urlKey = null;
             }
 
-            // Seed friendly welcome template if fresh workspace
-            if (!viewParam && !padParam && !window.location.hash && tabsData['main'] && !tabsData['main'].content) {
-                tabsData['main'].content = WELCOME_CHECKLIST_TEMPLATE;
-                if (editor) editor.value = WELCOME_CHECKLIST_TEMPLATE;
-            }
+            // Fresh workspaces start clean & blank. Example guide can be opened via Settings, File menu, or Command Palette.
 
             await initCrypto();
             if (tabsBar) tabsBar.classList.remove('hidden');
@@ -3672,13 +3685,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             }
                         }
                     } else {
+                        // Brand new workspace: start clean, blank and ready for user typing
                         if (tabsData['main'] && !tabsData['main'].content && !isReadOnly && !isBurnMode) {
-                            tabsData['main'].content = WELCOME_CHECKLIST_TEMPLATE;
-                            if (editor && activeTabId === 'main') editor.value = WELCOME_CHECKLIST_TEMPLATE;
                             updateHUD();
                             updatePreview();
-                            tabsContentDirty = true;
-                            saveWorkspace();
                         }
                     }
                 } catch (err) {
@@ -3951,6 +3961,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
         
         activeTabId = tid; 
+        if (currentToken) {
+            try { localStorage.setItem('quickpad_active_tab_' + currentToken, tid); } catch(e){}
+        }
         const isDrawTab = tabsData[tid] && tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
 
         // Check if destination tab is locked and user does NOT have the password
@@ -4020,6 +4033,38 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             payload[`tabs.${tid}`] = firebase.firestore.FieldValue.delete();
             await db.collection("workspaces").doc(currentToken).update(payload);
         } catch(e) {}
+    }
+
+    // --- Workspace Persistence & Recents Tracker ---
+    function updateRecentWorkspaces(hash) {
+        if (!hash || isBurnMode || isReadOnly) return;
+        try {
+            let recents = JSON.parse(localStorage.getItem('quickpad_recents') || '[]');
+            let title = 'Untitled Note';
+            if (tabsData) {
+                for (let tid in tabsData) {
+                    if (tabsData[tid] && tabsData[tid].content && tabsData[tid].content.trim()) {
+                        const firstLine = tabsData[tid].content.trim().split('\n')[0].replace(/^[#*\-_\s>]+/, '').trim();
+                        if (firstLine) {
+                            title = (tabsData[tid].name ? tabsData[tid].name + ': ' : '') + firstLine.substring(0, 30);
+                            break;
+                        }
+                    }
+                }
+            }
+            recents = recents.filter(r => r.hash !== hash);
+            recents.unshift({ hash, title, updated: Date.now() });
+            recents = recents.slice(0, 10);
+            localStorage.setItem('quickpad_recents', JSON.stringify(recents));
+        } catch(e) {}
+    }
+
+    function getRecentWorkspaces() {
+        try {
+            return JSON.parse(localStorage.getItem('quickpad_recents') || '[]');
+        } catch(e) {
+            return [];
+        }
     }
 
     // --- Workspace Save & Encryption ---
@@ -4098,6 +4143,15 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     tabsContentDirty = false;
                     isCloudQuotaExceeded = false;
                     setSaveStatus('saved');
+                    if (!isReadOnly && !isBurnMode && currentToken) {
+                        const fullHash = window.location.hash && window.location.hash.length > 1
+                            ? window.location.hash.substring(1)
+                            : (urlKey ? `${currentToken}_${urlKey}` : currentToken);
+                        try {
+                            localStorage.setItem('quickpad_last_active_hash', fullHash);
+                            updateRecentWorkspaces(fullHash);
+                        } catch(e) {}
+                    }
                 } catch(netErr) {
                     console.warn("Firestore save error:", netErr);
                     if (netErr && (netErr.code === 'resource-exhausted' || (netErr.message && netErr.message.includes('Quota exceeded')))) {
@@ -4680,7 +4734,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     }
 
     // --- Action Bar Triggers ---
-    if (newBtn) newBtn.addEventListener('click', () => { window.location.href = window.location.origin + window.location.pathname; });
+    if (newBtn) {
+        newBtn.addEventListener('click', () => {
+            const freshToken = generateToken();
+            try { localStorage.setItem('quickpad_last_active_hash', freshToken); } catch(e){}
+            window.location.hash = `#${freshToken}`;
+            window.location.reload();
+        });
+    }
 
     if (timerBtn) {
         timerBtn.addEventListener('click', async () => {
@@ -5049,55 +5110,209 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         });
     }
 
+    // --- Document Importer (Word .docx, PDF, RTF, Markdown, Code, Text, Backups) ---
+    async function extractTextFromPdf(file) {
+        if (!window.pdfjsLib) {
+            throw new Error("PDF processing engine not available");
+        }
+        try {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        } catch(e) {}
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+        const pdf = await loadingTask.promise;
+        let fullText = '';
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const content = await page.getTextContent();
+            let lastY, pageText = '';
+            for (let item of content.items) {
+                if (lastY !== undefined && Math.abs(item.transform[5] - lastY) > 5) {
+                    pageText += '\n';
+                } else if (pageText.length > 0 && !pageText.endsWith(' ') && !pageText.endsWith('\n')) {
+                    pageText += ' ';
+                }
+                pageText += item.str;
+                lastY = item.transform[5];
+            }
+            if (pdf.numPages > 1) {
+                fullText += `### Page ${pageNum}\n\n` + pageText.trim() + '\n\n';
+            } else {
+                fullText += pageText.trim();
+            }
+        }
+        return fullText.trim() || "(No readable text found in PDF)";
+    }
+
+    function extractTextFromRtf(rtfString) {
+        if (!rtfString) return '';
+        return rtfString
+            .replace(/\\par[d]?/g, '\n')
+            .replace(/\{\*?\\[^{}]+;?\}|[{}]|\\\w+[0-9]?\s?/g, '')
+            .replace(/\n\s*\n/g, '\n\n')
+            .trim();
+    }
+
+    async function processAndImportFile(file) {
+        if (!file) return;
+        const filename = file.name;
+        const lowerName = filename.toLowerCase();
+
+        try {
+            let content = '';
+
+            // 1. QuickPad JSON Backup
+            if (lowerName.endsWith('.json')) {
+                const text = await file.text();
+                try {
+                    const parsed = JSON.parse(text);
+                    if (parsed.tabs) {
+                        const overwrite = await showCustomConfirm("Restore Workspace", `"${filename}" contains a multi-tab workspace backup. Restore these tabs into your workspace?`);
+                        if (overwrite) {
+                            tabsData = parsed.tabs;
+                            activeTabId = Object.keys(tabsData)[0] || 'main';
+                            renderTabs();
+                            switchTab(activeTabId);
+                            saveWorkspace();
+                            showToast(`Workspace restored from "${filename}"`, 'success');
+                            return;
+                        }
+                    }
+                } catch(e) {}
+                content = text;
+            }
+            // 2. Microsoft Word Document (.docx)
+            else if (lowerName.endsWith('.docx')) {
+                if (window.mammoth) {
+                    showToast(`Extracting Word document "${filename}"...`, 'info', 2000);
+                    const arrayBuffer = await file.arrayBuffer();
+                    const result = await mammoth.convertToMarkdown({ arrayBuffer });
+                    content = result.value || "(Empty Word Document)";
+                } else {
+                    throw new Error("Word document processor not loaded");
+                }
+            }
+            // 3. PDF Document (.pdf)
+            else if (lowerName.endsWith('.pdf')) {
+                showToast(`Extracting text from PDF "${filename}"...`, 'info', 2000);
+                content = await extractTextFromPdf(file);
+            }
+            // 4. Rich Text Format (.rtf)
+            else if (lowerName.endsWith('.rtf')) {
+                const text = await file.text();
+                content = extractTextFromRtf(text);
+            }
+            // 5. All text, code, markdown, csv, and data formats
+            else {
+                content = await file.text();
+            }
+
+            // Check if current tab is blank and unedited
+            const activeTab = tabsData[activeTabId];
+            const isCurrentTabEmpty = activeTab && (!activeTab.content || !activeTab.content.trim()) && (activeTab.name === 'main.txt' || activeTab.name === 'main' || activeTab.name === 'Untitled');
+
+            if (isCurrentTabEmpty) {
+                activeTab.name = filename;
+                activeTab.content = content;
+                if (editor) editor.value = content;
+                renderTabs();
+                updateHUD();
+                updatePreview();
+                tabsContentDirty = true;
+                saveWorkspace();
+                showToast(`Opened "${filename}" for editing`, 'success');
+            } else {
+                const tid = generateToken();
+                tabsData[tid] = { name: filename, content: content, is_encrypted: false };
+                renderTabs();
+                switchTab(tid);
+                tabsContentDirty = true;
+                saveWorkspace();
+                showToast(`Imported "${filename}" into new tab`, 'success');
+            }
+        } catch (err) {
+            console.error("Document import error:", err);
+            showToast(`Could not import "${filename}": ${err.message || 'Unsupported format'}`, 'error', 5000);
+        }
+    }
+
     if (importFileBtn && fileImportInput) {
         importFileBtn.addEventListener('click', () => fileImportInput.click());
-        fileImportInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                handleImportedContent(file.name, event.target.result);
-            };
-            reader.readAsText(file);
+        fileImportInput.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files || []);
+            if (files.length === 0) return;
+            showLoader();
+            for (const file of files) {
+                await processAndImportFile(file);
+            }
+            hideLoader();
             fileImportInput.value = '';
         });
     }
 
     // Drag & Drop File Import onto Workspace
     window.addEventListener('dragover', (e) => e.preventDefault());
-    window.addEventListener('drop', (e) => {
+    window.addEventListener('drop', async (e) => {
         e.preventDefault();
-        if (e.dataTransfer && e.dataTransfer.files.length > 0) {
-            const file = e.dataTransfer.files[0];
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                handleImportedContent(file.name, event.target.result);
-            };
-            reader.readAsText(file);
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const files = Array.from(e.dataTransfer.files);
+            showLoader();
+            for (const file of files) {
+                await processAndImportFile(file);
+            }
+            hideLoader();
         }
     });
 
-    async function handleImportedContent(filename, text) {
-        if (filename.endsWith('.json')) {
-            try {
-                const parsed = JSON.parse(text);
-                if (parsed.tabs) {
-                    const overwrite = await showCustomConfirm("Restore Workspace", "This backup contains multiple tabs. Replace current workspace tabs?");
-                    if (overwrite) {
-                        tabsData = parsed.tabs;
-                        activeTabId = Object.keys(tabsData)[0] || 'main';
-                        switchTab(activeTabId);
-                        showToast("Workspace restored from backup", 'success');
-                        return;
-                    }
+    // --- Interactive Example Note & Guide Loader ---
+    function loadExampleGuide() {
+        const activeTab = tabsData[activeTabId];
+        // If active tab is clean and empty, load right into active tab
+        if (activeTab && (!activeTab.content || !activeTab.content.trim()) && (activeTab.name === 'main.txt' || activeTab.name === 'main' || activeTab.name === 'Untitled')) {
+            activeTab.name = 'Guide ⚡';
+            activeTab.content = WELCOME_CHECKLIST_TEMPLATE;
+            if (editor) editor.value = WELCOME_CHECKLIST_TEMPLATE;
+            renderTabs();
+            updateHUD();
+            updatePreview();
+            tabsContentDirty = true;
+            saveWorkspace();
+            showToast("Example Guide loaded into workspace", "success");
+        } else {
+            // Check if a Guide tab already exists
+            let existingGuideTid = null;
+            for (let tid in tabsData) {
+                if (tabsData[tid].name === 'Guide ⚡') {
+                    existingGuideTid = tid;
+                    break;
                 }
-            } catch (e) {}
+            }
+            if (existingGuideTid) {
+                switchTab(existingGuideTid);
+                showToast("Switched to Example Guide tab", "info");
+            } else {
+                const guideTid = 'guide_' + Date.now();
+                tabsData[guideTid] = {
+                    name: 'Guide ⚡',
+                    content: WELCOME_CHECKLIST_TEMPLATE,
+                    is_encrypted: false
+                };
+                renderTabs();
+                switchTab(guideTid);
+                tabsContentDirty = true;
+                saveWorkspace();
+                showToast("Opened Example Guide in a new tab", "success");
+            }
         }
-        // Import as new tab
-        const tid = generateToken();
-        tabsData[tid] = { name: filename, content: text, is_encrypted: false };
-        switchTab(tid);
-        showToast(`Imported "${filename}" into new tab`, 'success');
+    }
+
+    if (exampleGuideBtn) exampleGuideBtn.addEventListener('click', loadExampleGuide);
+    if (fileExampleGuideBtn) fileExampleGuideBtn.addEventListener('click', loadExampleGuide);
+    if (aboutOpenGuideBtn) {
+        aboutOpenGuideBtn.addEventListener('click', () => {
+            if (infoModal) infoModal.classList.add('hidden');
+            loadExampleGuide();
+        });
     }
 
     // --- Crypto & Encrypted Direct Messaging ---
@@ -7108,7 +7323,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         { name: "Toggle Pomodoro Focus Timer", shortcut: "🍅", action: () => togglePomodoro() },
         { name: "Reset Pomodoro Timer", shortcut: "Reset", action: () => resetPomodoro() },
         { name: "Highlight Selected Text", shortcut: "Mark", action: () => applyHighlight() },
-        { name: "🎭 Anonymous Voice Mask Settings", shortcut: "Voice", action: () => openVoiceMaskModal() }
+        { name: "🎭 Anonymous Voice Mask Settings", shortcut: "Voice", action: () => openVoiceMaskModal() },
+        { name: "📄 Upload Document (Word, PDF, Text, Code)...", shortcut: "Upload", action: () => fileImportInput && fileImportInput.click() },
+        { name: "📖 View Example Note & Feature Guide", shortcut: "Guide", action: () => loadExampleGuide() }
     ];
 
     function renderCmdResults(filterText = "") {
@@ -7122,6 +7339,24 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 filtered.push({ name: `Switch Tab: ${tabsData[tid].name}`, shortcut: "Tab", action: () => switchTab(tid) });
             }
         }
+
+        // Add recent workspaces so Chrome App and returning users can resume notes
+        const recents = getRecentWorkspaces();
+        recents.forEach(r => {
+            if (r.hash && r.hash !== currentToken && !r.hash.startsWith(currentToken)) {
+                if (!filterText || `recent ${r.title}`.toLowerCase().includes(filterText.toLowerCase())) {
+                    filtered.push({
+                        name: `Recent Note: ${r.title || 'Untitled Workspace'}`,
+                        shortcut: "Resume",
+                        action: () => {
+                            try { localStorage.setItem('quickpad_last_active_hash', r.hash); } catch(e){}
+                            window.location.hash = `#${r.hash}`;
+                            window.location.reload();
+                        }
+                    });
+                }
+            }
+        });
 
         if (filtered.length === 0) {
             cmdResults.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.85rem;">No matching commands found</div>';

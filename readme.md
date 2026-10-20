@@ -1,4 +1,4 @@
-# QuickPad ⚡ (v4.2 Pro — Zero-Knowledge Real-Time Scratchpad)
+# QuickPad ⚡ (v4.3 Pro — Zero-Knowledge Real-Time Scratchpad)
 
 QuickPad is a hyper-fast, serverless, real-time scratchpad engineered for absolute privacy and frictionless productivity. Designed to eliminate the bloat of modern note-taking: **no logins, no accounts, no tracking cookies, and no data harvesting**. You open the link, type, sketch, format, and collaborate.
 
@@ -8,7 +8,17 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 ---
 
-## ✨ What's New in Version 4.2 Pro
+## ✨ What's New in Version 4.3 Pro
+
+- 📄 **Multi-Format Document Upload & Editing:** Directly open, parse, and edit Microsoft Word (`.docx`), PDF documents (`.pdf`), Rich Text (`.rtf`), Markdown (`.md`), Code files, and plain text. Drag and drop any document straight into your workspace.
+- 🔄 **Chrome App & PWA Session Persistence:** Opening QuickPad from your desktop, dock, or Chrome Apps automatically resumes your active note right where you left off.
+- 🚀 **Clean Canvas Start & On-Demand Example Guide:** Fresh workspaces start completely clean and distraction-free. Load the interactive feature guide anytime via Settings, File menu, About dialog, or Command Palette (`⌘K`).
+- ⚡ **Snappy Fast Launch:** Splash screen transition sped up by over 60% for lightning-fast loads.
+- 🛡️ **100% Free, Private & Ad-Free:** Zero paywalls, zero accounts, zero tracking cookies, and zero ad networks. Pure, untracked productivity.
+
+---
+
+## 🌟 Version 4.2 Pro Features
 
 - 🖍️ **Multi-Color Text Highlighting:** Highlight selected text with a custom 10-color quick palette (Yellow, Lime, Green, Teal, Cyan, Pink, Coral, Orange, Purple, Silver) with one-click clear support directly from the floating formatting toolbar.
 - 🖼️ **Multi-Part Long Note PNG Export:** Long notes are now automatically paginated into elegant multi-part card images with prev/next navigation, individual part download, and a "Download All PNGs" batch export.
@@ -17,7 +27,7 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 ---
 
-## 🌟 Version 4.0 Pro Features
+## 🚀 Version 4.0 Pro Features
 
 - 🛡️ **Zero-Knowledge & Privacy Inspector:** Click the floating shield in the header to view a real-time cryptographic audit. Features split-screen Plaintext vs. AES-256 Ciphertext comparison, actual random IV & salt parameters, a "Central Server Payloads: 0 bytes sent" transparency guarantee, and one-click log export.
 - ✍️ **Floating Text Formatting Mini-Toolbar:** Medium/Notion-style contextual formatting bar appears automatically whenever you highlight text. Format bold, italics, headings, strikethrough, checklists, links, inline code, and blockquotes with zero markdown memory required.
@@ -27,7 +37,6 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 - 🏷️ **Inline Tab Renaming:** Double-click any tab directly on the tab bar to rename it inline (`Enter` commits, `Esc` cancels) without interrupting your flow.
 - ⏱️ **Word Count & Reading Time HUD:** Real-time word counter and estimated reading time indicator displayed alongside character count in the live HUD.
 - 💾 **Explicit Auto-Save & Sync Status Indicator:** Live visual indicator badge in the HUD displaying real-time sync status (`🟡 Syncing...` while typing, switching to `🟢 ✓ Encrypted & Saved` after debounced local and remote persistence).
-- 🚀 **First-Time Welcome Checklist Template:** Brand new workspaces automatically load a friendly interactive markdown checklist introducing key features and shortcuts.
 
 ---
 

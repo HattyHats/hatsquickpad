@@ -20,7 +20,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=85">
+    <link rel="stylesheet" href="style.css?v=88">
     
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -42,6 +42,12 @@
     
     <!-- DOMPurify to prevent Markdown XSS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
+
+    <!-- Mammoth.js for Word (.docx) Document Import -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
+    <!-- PDF.js for PDF Document Text Extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
     <!-- Firebase Compat SDKs (Ensures 100% functionality on local file:// and HTTPS) -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -106,10 +112,10 @@
                     splash.style.display = 'none';
                     const ed = document.getElementById('editor');
                     if (ed) ed.focus();
-                }, 600);
+                }, 350);
             }
-            // Auto dismiss after 2.0 seconds
-            setTimeout(dismissSplash, 2000);
+            // Snappy auto dismiss after 800ms
+            setTimeout(dismissSplash, 800);
             if (splash) splash.addEventListener('click', dismissSplash);
             window.addEventListener('keydown', dismissSplash, { once: true });
         })();
@@ -130,10 +136,10 @@
     <header id="app-header">
         <!-- Left Brand & Tabs -->
         <div class="header-left-section">
-            <div class="brand-badge" title="QuickPad Zero-Knowledge Workspace v4.2">
+            <div class="brand-badge" title="QuickPad Zero-Knowledge Workspace v4.3">
                 <span class="brand-icon">⚡</span>
                 <span class="brand-title">QUICKPAD</span>
-                <span class="brand-ver-tag">v4.2</span>
+                <span class="brand-ver-tag">v4.3</span>
                 <span class="sec-dot" title="E2EE AES-256 Active"></span>
             </div>
 
@@ -248,7 +254,10 @@
                     </button>
                     <div class="menu-divider"></div>
                     <button id="import-file-btn" class="menu-action-btn">
-                        <span>📤 Import File / Restore...</span>
+                        <span>📄 Upload Document (Word, PDF, Text, Code)...</span>
+                    </button>
+                    <button id="file-example-guide-btn" class="menu-action-btn">
+                        <span>📖 View Example Note Guide</span>
                     </button>
                     <button id="insert-image-btn" class="menu-action-btn">
                         <span>🖼️ Insert Image from Device...</span>
@@ -319,6 +328,7 @@
                         <input type="checkbox" id="glitch-toggle" checked style="cursor:pointer; accent-color:var(--primary-color);">
                     </div>
                     <div class="menu-divider"></div>
+                    <button id="example-guide-btn" class="menu-action-btn" style="color:var(--primary-color);">📖 View Example Guide</button>
                     <button id="name-btn" class="menu-action-btn">👤 Edit Profile</button>
                     <button id="info-btn" class="menu-action-btn">ℹ️ About QuickPad</button>
                     <div class="menu-divider"></div>
@@ -350,13 +360,13 @@
         <button id="find-close-btn" class="find-icon-btn close-find" title="Close (Esc)">&times;</button>
     </div>
 
-    <!-- Hidden File Input for Import -->
-    <input type="file" id="file-import-input" class="hidden" accept=".txt,.md,.json,.js,.py,.html,.css,.csv">
+    <!-- Hidden File Input for Document Import -->
+    <input type="file" id="file-import-input" class="hidden" multiple accept=".txt,.md,.markdown,.json,.docx,.pdf,.rtf,.csv,.tsv,.html,.htm,.css,.js,.ts,.tsx,.jsx,.py,.c,.cpp,.h,.cs,.java,.kt,.go,.rs,.rb,.php,.sh,.yaml,.yml,.xml,.sql,*/*">
 
     <!-- Workspace Main Editor, Previews & Whiteboard Canvas -->
     <main id="workspace-main">
         <div id="focus-line-indicator" class="focus-line-indicator"></div>
-        <textarea id="editor" placeholder="Start typing... Everything auto-saves with zero-knowledge AES-256 encryption. (Type / for commands, paste images, or create .draw for whiteboard)" autofocus></textarea>
+        <textarea id="editor" placeholder="Start typing... Everything auto-saves with zero-knowledge AES-256 encryption. (Type / for commands, drag & drop documents, or create .draw for whiteboard)" autofocus></textarea>
         
         <!-- Floating Medium/Notion-Style Text Formatting Toolbar -->
         <div id="floating-format-bar" class="floating-format-bar hidden">
@@ -672,9 +682,9 @@
         <div class="modal-content modal-standard info-modal-content">
             <span id="close-info" class="close-btn">&times;</span>
             <div class="text-center" style="margin-bottom: 20px;">
-                <div class="splash-badge" style="display:inline-block;margin-bottom:8px;">VERSION 4.2 PRO</div>
+                <div class="splash-badge" style="display:inline-block;margin-bottom:8px;">VERSION 4.3 PRO</div>
                 <h2 class="neon-text" style="font-size: 1.8rem; margin-bottom: 4px;">Quick-Pad</h2>
-                <p style="color: var(--primary-color); font-family: monospace; font-size: 0.85rem;">Zero-Knowledge Real-Time Scratchpad • v4.2 Pro</p>
+                <p style="color: var(--primary-color); font-family: monospace; font-size: 0.85rem;">Zero-Knowledge Real-Time Scratchpad • v4.3 Pro</p>
             </div>
             
             <p class="info-intro">QuickPad is a hyper-fast, serverless scratchpad that syncs instantly across your devices. Engineered for pure speed and absolute privacy: <strong>no accounts, no trackers, and no server-side plaintext storage</strong>. Open the link, type, and share.</p>
@@ -714,6 +724,10 @@
                 <li>🔒 <strong>Zero Privacy Impact:</strong> Your AES-256 encryption keys live exclusively in the URL hash fragment (<code>#</code>). Under web standard <strong>RFC 3986 §3.5</strong>, browsers never transmit hash fragments over network requests. Your notes remain 100% end-to-end encrypted and unreadable to third parties.</li>
                 <li>🛡️ <strong>Zero Tracking:</strong> No telemetry, no third-party ad networks, and no trackers. Pure, untracked productivity.</li>
             </ul>
+
+            <div style="margin: 16px 0 8px 0; text-align: center;">
+                <button id="about-open-guide-btn" class="btn" style="width:100%; justify-content:center; border-color:var(--primary-color); color:var(--primary-color); font-weight:600;">📖 Open Interactive Example Note &amp; Checklist</button>
+            </div>
 
             <div class="info-footer">
                 Information should be free. Build things that empower people.
@@ -1280,7 +1294,7 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=85"></script>
+    <script src="app.js?v=88"></script>
     <script>
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             let refreshing = false;
