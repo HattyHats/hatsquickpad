@@ -182,6 +182,7 @@
     const exportHtmlBtn = document.getElementById('export-html-btn');
     const importFileBtn = document.getElementById('import-file-btn');
     const fileImportInput = document.getElementById('file-import-input');
+    const deleteTabMenuBtn = document.getElementById('delete-tab-menu-btn');
     const exampleGuideBtn = document.getElementById('example-guide-btn');
     const fileExampleGuideBtn = document.getElementById('file-example-guide-btn');
     const aboutOpenGuideBtn = document.getElementById('about-open-guide-btn');
@@ -3736,12 +3737,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         for (let tid in tabsData) {
             let t = document.createElement('div');
             t.className = 'tab' + (tid === activeTabId ? ' active' : ''); 
-            t.innerText = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
+            t.title = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
             
+            let titleSpan = document.createElement('span');
+            titleSpan.className = 'tab-title';
+            titleSpan.innerText = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
+            t.appendChild(titleSpan);
+
             let delBtn = document.createElement('span');
             delBtn.className = 'tab-close';
             delBtn.innerText = '✕';
-            delBtn.title = "Delete Tab";
+            delBtn.title = `Delete "${tabsData[tid].name}"`;
             delBtn.onclick = async (e) => {
                 e.stopPropagation();
                 const confirmed = await showCustomConfirm("Delete Tab", `Are you sure you want to delete tab "${tabsData[tid].name}"?`);
@@ -3765,6 +3771,15 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     });
                     saveWorkspace();
                     showToast("Tab deleted", 'info');
+                }
+            };
+
+            t.oncontextmenu = async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const confirmed = await showCustomConfirm("Delete Tab", `Delete tab "${tabsData[tid].name}"?`);
+                if (confirmed) {
+                    delBtn.click();
                 }
             };
 
@@ -3833,6 +3848,34 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         }
     }
+
+    async function deleteActiveTab() {
+        if (!activeTabId || !tabsData[activeTabId]) return;
+        const tabName = tabsData[activeTabId].name;
+        const confirmed = await showCustomConfirm("Delete Tab", `Are you sure you want to delete tab "${tabName}"?`);
+        if (confirmed) {
+            const tid = activeTabId;
+            delete tabsData[tid];
+            tabsContentDirty = true;
+            activeTabId = Object.keys(tabsData)[0] || null;
+            if (!activeTabId) {
+                activeTabId = generateToken();
+                tabsData[activeTabId] = { name: 'main.txt', content: '', is_encrypted: false };
+            }
+            switchTab(activeTabId);
+            renderTabs();
+            deleteTabFromDB(tid);
+            broadcastLocalSync({
+                type: 'tabs_structure',
+                tabs: tabsData,
+                senderId: myDeviceId
+            });
+            saveWorkspace();
+            showToast("Tab deleted", 'info');
+        }
+    }
+
+    if (deleteTabMenuBtn) deleteTabMenuBtn.addEventListener('click', deleteActiveTab);
 
     let lastLockedTabIdShowing = null;
 
@@ -4872,11 +4915,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         updatePrivacyInspector();
     }
 
-    if (privacyInspectorBtn) privacyInspectorBtn.addEventListener('click', openPrivacyInspector);
+    if (privacyInspectorBtn) {
+        privacyInspectorBtn.addEventListener('click', openPrivacyInspector);
+        privacyInspectorBtn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openPrivacyInspector();
+            }
+        });
+    }
     if (closePrivacyInspector) closePrivacyInspector.addEventListener('click', () => privacyInspectorModal && privacyInspectorModal.classList.add('hidden'));
 
     const brandBadgeEl = document.querySelector('.brand-badge');
-    if (brandBadgeEl) {
+    if (brandBadgeEl && brandBadgeEl !== privacyInspectorBtn) {
         brandBadgeEl.style.cursor = 'pointer';
         brandBadgeEl.addEventListener('click', openPrivacyInspector);
     }
@@ -7325,7 +7376,8 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         { name: "Highlight Selected Text", shortcut: "Mark", action: () => applyHighlight() },
         { name: "🎭 Anonymous Voice Mask Settings", shortcut: "Voice", action: () => openVoiceMaskModal() },
         { name: "📄 Upload Document (Word, PDF, Text, Code)...", shortcut: "Upload", action: () => fileImportInput && fileImportInput.click() },
-        { name: "📖 View Example Note & Feature Guide", shortcut: "Guide", action: () => loadExampleGuide() }
+        { name: "📖 View Example Note & Feature Guide", shortcut: "Guide", action: () => loadExampleGuide() },
+        { name: "🗑️ Delete Current Tab", shortcut: "Delete", action: () => deleteActiveTab() }
     ];
 
     function renderCmdResults(filterText = "") {

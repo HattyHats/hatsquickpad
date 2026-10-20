@@ -20,7 +20,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=88">
+    <link rel="stylesheet" href="style.css?v=91">
     
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -136,18 +136,12 @@
     <header id="app-header">
         <!-- Left Brand & Tabs -->
         <div class="header-left-section">
-            <div class="brand-badge" title="QuickPad Zero-Knowledge Workspace v4.3">
+            <div id="privacy-inspector-btn" class="brand-badge" role="button" tabindex="0" title="QuickPad Zero-Knowledge Workspace • Click for Privacy Inspector">
                 <span class="brand-icon">⚡</span>
                 <span class="brand-title">QUICKPAD</span>
                 <span class="brand-ver-tag">v4.3</span>
-                <span class="sec-dot" title="E2EE AES-256 Active"></span>
+                <span class="brand-shield" title="E2EE AES-256 Active • Zero-Knowledge Privacy Inspector">🛡️</span>
             </div>
-
-            <!-- Zero-Knowledge Privacy Inspector Shield Button -->
-            <button id="privacy-inspector-btn" class="header-icon-btn shield-btn" title="Zero-Knowledge Privacy Inspector (Verify Encryption Live)">
-                <span class="shield-icon">🛡️</span>
-                <span class="shield-badge-dot"></span>
-            </button>
 
             <!-- Tabs Bar -->
             <div id="tabs-bar">
@@ -159,12 +153,81 @@
         </div>
 
         <!-- Right Action Bar -->
-        <!-- Right Action Bar -->
         <div class="action-bar">
-            <!-- Find & Replace Button -->
-            <button id="find-toggle-btn" class="btn" title="Find & Replace in document (⌘F)">
-                <span class="btn-icon">🔍</span><span class="btn-text">Find</span>
-            </button>
+            <!-- File Actions Dropdown -->
+            <div class="btn dropdown-group" title="File Actions">
+                <span class="btn-icon">📁</span><span class="btn-text">File</span>
+                <div class="dropdown-menu">
+                    <button id="export-md-btn" class="menu-action-btn">
+                        <span>📥 Download Markdown (.md)</span>
+                    </button>
+                    <button id="export-txt-btn" class="menu-action-btn">
+                        <span>📄 Download Text (.txt)</span>
+                    </button>
+                    <button id="export-json-btn" class="menu-action-btn">
+                        <span>📦 Backup All Tabs (.json)</span>
+                    </button>
+                    <button id="export-html-btn" class="menu-action-btn" style="color:var(--primary-color);">
+                        <span>🔐 Export Encrypted HTML (.html)</span>
+                    </button>
+                    <button id="export-card-btn" class="menu-action-btn" style="color:#ffb000;">
+                        <span>🎨 Export Note as Image Card (.png)</span>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button id="steg-open-btn" class="menu-action-btn" style="color:#00fff9;">
+                        <span>🖼️ Ghost Steganography...</span>
+                    </button>
+                    <button id="wormhole-open-btn" class="menu-action-btn" style="color:#00ff66;">
+                        <span>⚡ P2P Wormhole File Beam...</span>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button id="import-file-btn" class="menu-action-btn">
+                        <span>📄 Upload Document (Word, PDF, Text, Code)...</span>
+                    </button>
+                    <button id="file-example-guide-btn" class="menu-action-btn">
+                        <span>📖 View Example Note Guide</span>
+                    </button>
+                    <button id="insert-image-btn" class="menu-action-btn">
+                        <span>🖼️ Insert Image from Device...</span>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button id="delete-tab-menu-btn" class="menu-action-btn" style="color:#ff4d6d;">
+                        <span>🗑️ Delete Current Tab</span>
+                    </button>
+                    <input type="file" id="note-image-file-input" accept="image/*" style="display:none;">
+                </div>
+            </div>
+
+            <!-- Edit Dropdown (Combines Find, Copy, Typography & Command Palette) -->
+            <div class="btn dropdown-group" title="Edit & Formatting Options">
+                <span class="btn-icon">✏️</span><span class="btn-text">Edit</span>
+                <div class="dropdown-menu">
+                    <button id="copy-btn" class="menu-action-btn">
+                        <span>📋 Copy Note to Clipboard</span>
+                        <kbd>⌘C</kbd>
+                    </button>
+                    <button id="find-toggle-btn" class="menu-action-btn">
+                        <span>🔍 Find &amp; Replace in Note</span>
+                        <kbd>⌘F</kbd>
+                    </button>
+                    <button id="cmd-palette-btn" class="menu-action-btn">
+                        <span>⚡ Command Palette</span>
+                        <kbd>⌘K</kbd>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <div class="menu-label">Typography</div>
+                    <div class="menu-row font-selector">
+                        <button id="font-mono-btn" class="font-btn active" data-font="mono">Mono</button>
+                        <button id="font-sans-btn" class="font-btn" data-font="sans">Sans</button>
+                        <button id="font-serif-btn" class="font-btn" data-font="serif">Serif</button>
+                    </div>
+                    <div class="menu-row font-size-ctrls">
+                        <button id="font-dec-btn" class="menu-action-btn font-size-btn">A-</button>
+                        <span id="font-size-label" class="font-size-val">16px</span>
+                        <button id="font-inc-btn" class="menu-action-btn font-size-btn">A+</button>
+                    </div>
+                </div>
+            </div>
 
             <!-- View Dropdown -->
             <div class="btn dropdown-group" title="View Options">
@@ -202,74 +265,6 @@
                     </button>
                 </div>
             </div>
-
-            <!-- Editor & Typography Dropdown -->
-            <div class="btn dropdown-group" title="Editor & Typography">
-                <span class="btn-icon">⚙️</span><span class="btn-text">Format</span>
-                <div class="dropdown-menu">
-                    <div class="menu-label">Typography</div>
-                    <div class="menu-row font-selector">
-                        <button id="font-mono-btn" class="font-btn active" data-font="mono">Mono</button>
-                        <button id="font-sans-btn" class="font-btn" data-font="sans">Sans</button>
-                        <button id="font-serif-btn" class="font-btn" data-font="serif">Serif</button>
-                    </div>
-                    <div class="menu-row font-size-ctrls">
-                        <button id="font-dec-btn" class="menu-action-btn font-size-btn">A-</button>
-                        <span id="font-size-label" class="font-size-val">16px</span>
-                        <button id="font-inc-btn" class="menu-action-btn font-size-btn">A+</button>
-                    </div>
-                    <div class="menu-divider"></div>
-                    <button id="cmd-palette-btn" class="menu-action-btn">
-                        <span>⚡ Command Palette</span>
-                        <kbd>⌘K</kbd>
-                    </button>
-                </div>
-            </div>
-
-            <!-- File Actions Dropdown -->
-            <div class="btn dropdown-group" title="File Actions">
-                <span class="btn-icon">📁</span><span class="btn-text">File</span>
-                <div class="dropdown-menu">
-                    <button id="export-md-btn" class="menu-action-btn">
-                        <span>📥 Download Markdown (.md)</span>
-                    </button>
-                    <button id="export-txt-btn" class="menu-action-btn">
-                        <span>📄 Download Text (.txt)</span>
-                    </button>
-                    <button id="export-json-btn" class="menu-action-btn">
-                        <span>📦 Backup All Tabs (.json)</span>
-                    </button>
-                    <button id="export-html-btn" class="menu-action-btn" style="color:var(--primary-color);">
-                        <span>🔐 Export Encrypted HTML (.html)</span>
-                    </button>
-                    <button id="export-card-btn" class="menu-action-btn" style="color:#ffb000;">
-                        <span>🎨 Export Note as Image Card (.png)</span>
-                    </button>
-                    <div class="menu-divider"></div>
-                    <button id="steg-open-btn" class="menu-action-btn" style="color:#00fff9;">
-                        <span>🖼️ Ghost Steganography...</span>
-                    </button>
-                    <button id="wormhole-open-btn" class="menu-action-btn" style="color:#00ff66;">
-                        <span>⚡ P2P Wormhole File Beam...</span>
-                    </button>
-                    <div class="menu-divider"></div>
-                    <button id="import-file-btn" class="menu-action-btn">
-                        <span>📄 Upload Document (Word, PDF, Text, Code)...</span>
-                    </button>
-                    <button id="file-example-guide-btn" class="menu-action-btn">
-                        <span>📖 View Example Note Guide</span>
-                    </button>
-                    <button id="insert-image-btn" class="menu-action-btn">
-                        <span>🖼️ Insert Image from Device...</span>
-                    </button>
-                    <input type="file" id="note-image-file-input" accept="image/*" style="display:none;">
-                </div>
-            </div>
-            
-            <!-- Quick Copy -->
-            <button id="copy-btn" class="btn" title="Copy note text to clipboard (⌘C)">
-                <span class="btn-icon">📋</span><span class="btn-text">Copy</span>
-            </button>
 
             <!-- Direct Share Button -->
             <button id="share-btn" class="btn primary-action share-btn" title="Share Workspace Links & QR">
@@ -1294,7 +1289,7 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=88"></script>
+    <script src="app.js?v=91"></script>
     <script>
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             let refreshing = false;

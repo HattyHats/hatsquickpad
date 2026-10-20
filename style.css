@@ -108,7 +108,14 @@ body, html {
     border: 1px solid rgba(var(--primary-rgb), 0.25);
     border-radius: 8px;
     user-select: none;
-    cursor: default;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    flex-shrink: 0;
+}
+.brand-badge:hover {
+    background: rgba(var(--primary-rgb), 0.16);
+    border-color: rgba(var(--primary-rgb), 0.45);
+    box-shadow: 0 0 10px var(--primary-shadow);
 }
 .brand-icon {
     font-size: 0.9rem;
@@ -121,6 +128,20 @@ body, html {
     letter-spacing: 1.5px;
     color: #fff;
     font-family: var(--font-mono);
+}
+.brand-shield {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    line-height: 1;
+    filter: drop-shadow(0 0 4px var(--primary-shadow));
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), filter 0.2s ease;
+    margin-left: 1px;
+}
+.brand-badge:hover .brand-shield {
+    transform: scale(1.15);
+    filter: drop-shadow(0 0 8px var(--primary-color));
 }
 .sec-dot {
     width: 6px;
@@ -151,26 +172,26 @@ body, html {
 #tabs-container {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     flex-shrink: 0;
 }
 
 .tab {
-    padding: 5px 12px;
+    padding: 4px 6px 4px 10px;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border-color);
     color: var(--text-muted);
-    border-radius: 8px;
+    border-radius: 7px;
     cursor: pointer;
-    font-size: 0.82rem;
+    font-size: 0.80rem;
     font-family: var(--font-mono);
     user-select: none;
     white-space: nowrap;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 7px;
-    max-width: 170px;
-    text-overflow: ellipsis;
+    gap: 5px;
+    max-width: 145px;
+    min-width: 45px;
     overflow: hidden;
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -185,16 +206,30 @@ body, html {
     border-color: rgba(var(--primary-rgb), 0.4);
     box-shadow: 0 0 12px rgba(var(--primary-rgb), 0.15);
 }
+.tab-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .tab-close {
-    font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.3);
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.4);
     border-radius: 4px;
-    padding: 1px 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
     transition: all 0.15s;
+    margin-left: 2px;
 }
 .tab-close:hover {
-    color: #ff4d6d;
-    background: rgba(255, 77, 109, 0.15);
+    color: #fff;
+    background: rgba(255, 77, 109, 0.35);
 }
 
 .header-icon-btn {
@@ -516,8 +551,17 @@ body, html {
 .action-bar {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
+}
+.action-bar .btn {
+    padding: 4px 8px;
+    font-size: 0.80rem;
+    gap: 4px;
+    border-radius: 6px;
+}
+.action-bar .btn .btn-icon {
+    font-size: 0.84rem;
 }
 .share-btn {
     background: rgba(var(--primary-rgb), 0.16) !important;
@@ -2319,15 +2363,15 @@ body.zen-mode #zen-exit-btn { display: block; }
 
 /* --- Multi-Stage Responsiveness for Shrunk Desktop & Mobile Screens --- */
 
-/* Stage 1: Medium / Shrunk Desktop Windows (<= 1200px) */
-@media (max-width: 1200px) {
+/* Stage 1: Medium / Shrunk Desktop Windows (<= 1280px) */
+@media (max-width: 1280px) {
     /* Collapse secondary action-bar buttons to sleek icon buttons */
     .action-bar .btn:not(.share-btn):not(.btn-new-pad) .btn-text {
         display: none;
     }
     .action-bar .btn:not(.share-btn):not(.btn-new-pad) {
-        padding: 5px 8px;
-        min-width: 32px;
+        padding: 4px 7px;
+        min-width: 28px;
         justify-content: center;
     }
     
@@ -2357,10 +2401,7 @@ body.zen-mode #zen-exit-btn { display: block; }
         gap: 4px;
     }
 
-    /* Collapse Share and New to icon buttons, hide redundant Copy button */
-    #copy-btn {
-        display: none;
-    }
+    /* Collapse Share and New to icon buttons */
     .action-bar .share-btn .btn-text,
     .action-bar .btn-new-pad .btn-text {
         display: none;
