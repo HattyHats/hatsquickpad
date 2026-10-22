@@ -21,7 +21,16 @@
 
     // iOS Keyboard Dismiss Fix
     window.addEventListener('focusout', () => window.scrollTo(0, 0));
-    window.addEventListener('hashchange', () => window.location.reload());
+
+    let isAppInitialized = false;
+    let lastKnownHash = window.location.hash;
+    window.addEventListener('hashchange', () => {
+        if (!isAppInitialized) return;
+        if (window.location.hash !== lastKnownHash) {
+            lastKnownHash = window.location.hash;
+            window.location.reload();
+        }
+    });
 
     // Firebase Initialization (Compat mode for universal file:// and HTTPS compatibility)
     const firebaseConfig = {
@@ -405,8 +414,8 @@
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
 
-    // v4.3 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.3 Pro
+    // v4.4 Pro Welcome Template
+    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.4 Pro
 
 Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
 Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
@@ -2799,6 +2808,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (mdToggleBtn) mdToggleBtn.style.display = 'none';
             if (burnBtn) burnBtn.style.display = 'none';
             if (instantBurnBtn) instantBurnBtn.style.display = 'none';
+            if (shareBtn) shareBtn.style.display = 'none';
             if (tabsBar) tabsBar.style.display = 'none';
             if (liveHud) liveHud.style.display = 'none';
             if (editor) editor.readOnly = true;
@@ -2938,11 +2948,24 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 container.scrollLeft = scrollLeft - walk;
             });
         });
+
+        setTimeout(() => {
+            isAppInitialized = true;
+            lastKnownHash = window.location.hash;
+        }, 500);
     }
 
     function generateToken() { 
         return Math.random().toString(36).substring(2, 12) + '_' + Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12); 
     }
+
+    function createNewWorkspace() {
+        try { localStorage.removeItem('quickpad_last_active_hash'); } catch(e){}
+        const freshToken = generateToken();
+        try { localStorage.setItem('quickpad_last_active_hash', freshToken); } catch(e){}
+        window.location.href = window.location.origin + window.location.pathname + '#' + freshToken;
+    }
+    window.createNewWorkspace = createNewWorkspace;
 
     // --- Local Multi-Tab Real-Time Sync Engine (BroadcastChannel) ---
     function initBroadcastSync(token) {
@@ -3297,12 +3320,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             if (data.expires_at && Date.now() > data.expires_at && !data.burned) {
                                 db.collection("workspaces").doc(token).set({ burned: true }, { merge: true });
                             }
+                            try {
+                                localStorage.removeItem('quickpad_last_active_hash');
+                                localStorage.removeItem(`qp_cached_${token}`);
+                                localStorage.removeItem(`qp_active_tab_${token}`);
+                            } catch(e) {}
+                            window.history.replaceState({}, '', window.location.origin + window.location.pathname);
                             document.body.innerHTML = `
                                 <div style='height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#050811;color:#fff;'>
                                     <div class='splash-badge' style='margin-bottom:15px;color:#ff0055;border-color:rgba(255,0,85,0.4);'>ZERO-TRACE ACTIVE</div>
                                     <h1 class='glitch-text' data-text='WORKSPACE BURNED' style='color:#ff0055;text-shadow:0 0 24px rgba(255,0,85,0.6);margin-bottom:20px;'>WORKSPACE BURNED</h1>
                                     <p style='color:#94a3b8;font-family:monospace;margin-bottom:30px;max-width:400px;text-align:center;'>This workspace reached its expiration timer or was deleted. All ciphertext was eradicated.</p>
-                                    <button onclick="window.location.href=window.location.origin+window.location.pathname" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;">Create New Pad</button>
+                                    <button onclick="if(window.createNewWorkspace){window.createNewWorkspace();}else{try{localStorage.removeItem('quickpad_last_active_hash');}catch(e){};var t=(Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12));try{localStorage.setItem('quickpad_last_active_hash',t);}catch(e){};window.location.href=window.location.origin+window.location.pathname+'#'+t;}" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;cursor:pointer;">Create New Pad</button>
                                 </div>`;
                             return;
                         }
@@ -4644,42 +4673,110 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     if (copyViewLink) copyViewLink.addEventListener('click', () => shareViewLink && copyToClipboard(shareViewLink.value, "Read-Only link copied!"));
 
     // --- Self-Destruct Burn Notes ---
+    const burnLinkModal = document.getElementById('burn-link-modal');
+    const closeBurnModal = document.getElementById('close-burn-modal');
+    const burnNoteUrlInput = document.getElementById('burn-note-url-input');
+    const copyBurnUrlBtn = document.getElementById('copy-burn-url-btn');
+    const burnCopyFeedback = document.getElementById('burn-copy-feedback');
+    const burnClearNoteBtn = document.getElementById('burn-clear-note-btn');
+    const doneBurnModalBtn = document.getElementById('done-burn-modal-btn');
+
+    function openBurnLinkModal(url, isWholeNote) {
+        if (!burnLinkModal) return;
+        if (burnNoteUrlInput) {
+            burnNoteUrlInput.value = url;
+        }
+        if (burnCopyFeedback) {
+            burnCopyFeedback.innerText = "🔥 Link copied to your clipboard!";
+            burnCopyFeedback.style.color = "#00fff9";
+        }
+        if (burnClearNoteBtn) {
+            burnClearNoteBtn.style.display = isWholeNote ? 'inline-block' : 'none';
+        }
+        burnLinkModal.classList.remove('hidden');
+        if (burnNoteUrlInput) {
+            burnNoteUrlInput.focus();
+            burnNoteUrlInput.select();
+        }
+    }
+
+    if (closeBurnModal) closeBurnModal.addEventListener('click', () => burnLinkModal && burnLinkModal.classList.add('hidden'));
+    if (doneBurnModalBtn) doneBurnModalBtn.addEventListener('click', () => burnLinkModal && burnLinkModal.classList.add('hidden'));
+
+    if (copyBurnUrlBtn) {
+        copyBurnUrlBtn.addEventListener('click', async () => {
+            if (!burnNoteUrlInput || !burnNoteUrlInput.value) return;
+            const success = await copyToClipboard(burnNoteUrlInput.value, "🔥 Burn Link Copied!");
+            if (burnCopyFeedback) {
+                burnCopyFeedback.innerText = success ? "✅ Copied to clipboard!" : "Press Ctrl+C / Cmd+C to copy";
+                burnCopyFeedback.style.color = success ? "#00ff66" : "#ffb000";
+            }
+        });
+    }
+
+    if (burnClearNoteBtn) {
+        burnClearNoteBtn.addEventListener('click', () => {
+            if (editor) editor.value = '';
+            if (activeTabId && tabsData[activeTabId]) {
+                tabsData[activeTabId].content = '';
+            }
+            if (typeof saveWorkspace === 'function') saveWorkspace();
+            showToast("Note content erased from active tab.", "info");
+            if (burnLinkModal) burnLinkModal.classList.add('hidden');
+        });
+    }
+
     if (burnBtn) {
         burnBtn.addEventListener('click', async () => {
-            if (!editor) return;
-            const start = editor.selectionStart;
-            const end = editor.selectionEnd;
-            const selection = editor.value.substring(start, end);
-            let content = selection || editor.value;
+            let content = '';
+            let selection = '';
+            let start = 0;
+            let end = 0;
+
+            if (tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw')) {
+                content = tabsData[activeTabId].content || '';
+            } else if (editor) {
+                start = editor.selectionStart;
+                end = editor.selectionEnd;
+                selection = (start !== undefined && end !== undefined && start !== end) ? editor.value.substring(start, end) : '';
+                content = selection || editor.value;
+            }
             
-            if (!content.trim()) {
+            if (!content || !content.trim()) {
                 showToast("Nothing to burn! Write something first.", 'error');
                 return;
             }
 
-            const confirmed = await showCustomConfirm("Create Burn Note", "This will generate a self-destructing link that permanently erases after being read once. Proceed?");
-            if (!confirmed) return;
-
             try {
-                const token = generateToken();
+                showToast("🔥 Creating self-destruct note...", "info", 1500);
+                const burnId = 'bn' + Math.random().toString(36).substring(2, 14) + Math.random().toString(36).substring(2, 14);
                 const burnKey = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                let encryptedContent = content;
                 if (typeof CryptoJS !== 'undefined') {
-                    content = CryptoJS.AES.encrypt(content, burnKey).toString();
+                    encryptedContent = CryptoJS.AES.encrypt(content, burnKey).toString();
+                }
+                if (!db && typeof firebase !== 'undefined' && firebase.firestore) {
+                    db = firebase.firestore();
                 }
                 if (db) {
-                    await db.collection("burn_notes").doc(token).set({ content: content, created_at: firebase.firestore.FieldValue.serverTimestamp() });
+                    await db.collection("burn_notes").doc(burnId).set({
+                        content: encryptedContent,
+                        created_at: firebase.firestore.FieldValue.serverTimestamp()
+                    });
                 }
-                const burnUrl = `${window.location.origin}${window.location.pathname}?burn=${token}_${burnKey}`;
+                const burnUrl = `${window.location.origin}${window.location.pathname}?burn=${burnId}#${burnKey}`;
                 
                 await copyToClipboard(burnUrl, "🔥 Burn Link Copied! Send it to your recipient.");
                 
-                if (!selection) {
-                    if (db) await db.collection("workspaces").doc(currentToken).set({ burned: true }, { merge: true });
-                } else {
+                if (selection && editor) {
                     editor.value = editor.value.substring(0, start) + editor.value.substring(end);
-                    saveWorkspace();
+                    if (typeof saveWorkspace === 'function') saveWorkspace();
                 }
+
+                // Display the Burn Note Modal with the URL, copy button, and clear options
+                openBurnLinkModal(burnUrl, !selection);
             } catch (e) {
+                console.error("Burn note link generation error:", e);
                 showToast("Failed to create burn link.", 'error');
             }
         });
@@ -4715,6 +4812,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             try {
                 localStorage.removeItem(`qp_cached_${currentToken}`);
                 localStorage.removeItem(`qp_active_tab_${currentToken}`);
+                localStorage.removeItem('quickpad_last_active_hash');
             } catch (e) {}
 
             // Reset URL hash to origin so refreshing does not reload a dead token
@@ -4726,7 +4824,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     <div class='splash-badge' style='margin-bottom:15px;color:#ff0055;border-color:rgba(255,0,85,0.4);'>ZERO-TRACE ACTIVE</div>
                     <h1 class='glitch-text' data-text='WORKSPACE BURNED' style='color:#ff0055;text-shadow:0 0 24px rgba(255,0,85,0.6);margin-bottom:20px;'>WORKSPACE BURNED</h1>
                     <p style='color:#94a3b8;font-family:monospace;margin-bottom:30px;max-width:400px;text-align:center;'>This workspace has been permanently eradicated. All ciphertext, tabs, and keys were shredded from the server.</p>
-                    <button onclick="window.location.href=window.location.origin+window.location.pathname" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;">Create New Pad</button>
+                    <button onclick="if(window.createNewWorkspace){window.createNewWorkspace();}else{try{localStorage.removeItem('quickpad_last_active_hash');}catch(e){};var t=(Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12));try{localStorage.setItem('quickpad_last_active_hash',t);}catch(e){};window.location.href=window.location.origin+window.location.pathname+'#'+t;}" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;cursor:pointer;">Create New Pad</button>
                 </div>`;
         } catch (err) {
             console.error("Instant burn error:", err);
@@ -4740,50 +4838,69 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
     async function fetchBurnNote(tokenKey) {
         try {
+            if (!db && typeof firebase !== 'undefined' && firebase.firestore) {
+                db = firebase.firestore();
+            }
+            if (!db) {
+                if (editor) editor.value = "Database connection unavailable. Please check your internet connection.";
+                return;
+            }
+
             let token = tokenKey;
             let key = null;
-            if (tokenKey.includes('_')) {
-                let parts = tokenKey.split('_');
-                token = parts[0];
-                key = parts.slice(1).join('_');
+
+            // 1. Check if encryption key is in URL hash fragment (#key)
+            if (window.location.hash && window.location.hash.length > 1) {
+                key = window.location.hash.substring(1);
             }
-            
-            if (!db) return;
+
+            // 2. Check query params for key
+            if (!key) {
+                const urlParams = new URLSearchParams(window.location.search);
+                key = urlParams.get('key') || urlParams.get('k');
+            }
+
+            // 3. Fallback for legacy format with underscore (?burn=token_key or ?burn=part1_part2_part3_key)
+            if (!key && tokenKey && tokenKey.includes('_')) {
+                const lastIdx = tokenKey.lastIndexOf('_');
+                token = tokenKey.substring(0, lastIdx);
+                key = tokenKey.substring(lastIdx + 1);
+            }
+
             const docSnap = await db.collection("burn_notes").doc(token).get();
             if (docSnap.exists) { 
                 let content = docSnap.data().content;
-                if (key && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                if (key && content && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
                     try {
                         const bytes = CryptoJS.AES.decrypt(content, key);
                         const dec = bytes.toString(CryptoJS.enc.Utf8);
                         if (dec) content = dec;
-                    } catch(e) {}
+                    } catch(e) {
+                        console.error("AES Decryption error:", e);
+                    }
                 }
                 if (editor) {
                     editor.value = content; 
-                    showToast("🔥 Self-Destruct Activated: this note has been wiped from the server.", 'error', 6000);
+                    showToast("🔥 Self-Destruct Activated: this note has been wiped from the server.", 'error', 7000);
                 }
                 await db.collection("burn_notes").doc(token).delete(); 
             } else {
                 if (editor) {
-                    editor.value = "Note not found or already burned.";
+                    editor.value = "🔥 Note not found or already burned.\n\nThis self-destruct note has already been opened and permanently destroyed from the server.";
                     editor.style.color = "#ff4d6d";
                 }
+                showToast("This burn note has already been opened and destroyed.", "error", 6000);
             }
             updatePreview();
         } catch (e) {
+            console.error("Error retrieving burn note:", e);
             if (editor) editor.value = "Error retrieving burned note.";
         }
     }
 
     // --- Action Bar Triggers ---
     if (newBtn) {
-        newBtn.addEventListener('click', () => {
-            const freshToken = generateToken();
-            try { localStorage.setItem('quickpad_last_active_hash', freshToken); } catch(e){}
-            window.location.hash = `#${freshToken}`;
-            window.location.reload();
-        });
+        newBtn.addEventListener('click', createNewWorkspace);
     }
 
     if (timerBtn) {
@@ -4976,7 +5093,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     }
 
     // --- Universal Modal Backdrop & Escape Dismissal ---
-    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal, privacyInspectorModal, cardExportModal, voiceMaskModal];
+    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal, privacyInspectorModal, cardExportModal, voiceMaskModal, burnLinkModal];
 
     allModals.forEach(modal => {
         if (!modal) return;
