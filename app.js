@@ -2527,29 +2527,90 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
     }
 
+    function updateViewVisibility() {
+        if (!editor || !preview) return;
+        const isDrawTab = activeTabId && tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
+
+        if (isDrawTab) {
+            editor.classList.add('hidden');
+            editor.style.display = 'none';
+            preview.classList.add('hidden');
+            preview.style.display = 'none';
+            if (editorMirror) editorMirror.style.display = 'none';
+            return;
+        }
+
+        if (isSplitMode) {
+            document.body.classList.add('split-mode');
+            editor.classList.remove('hidden');
+            editor.style.display = '';
+            preview.classList.remove('hidden');
+            preview.style.display = 'block';
+            if (editorMirror) editorMirror.style.display = '';
+            updatePreview();
+        } else if (isMarkdown) {
+            document.body.classList.remove('split-mode');
+            editor.classList.add('hidden');
+            editor.style.display = 'none';
+            preview.classList.remove('hidden');
+            preview.style.display = 'block';
+            if (editorMirror) editorMirror.style.display = 'none';
+            updatePreview();
+        } else {
+            document.body.classList.remove('split-mode');
+            editor.classList.remove('hidden');
+            editor.style.display = '';
+            preview.classList.add('hidden');
+            preview.style.display = 'none';
+            if (editorMirror) editorMirror.style.display = '';
+        }
+    }
+
     function updatePreview() {
         if (!isMarkdown && !isSplitMode) return;
-        if (typeof marked === 'undefined' || !preview || !editor) return;
+        if (!preview || !editor) return;
         
-        // 1. Pre-process poll syntax into cyber poll cards & markdown highlights
         const rawContent = editor.value || '';
-        let processedContent = processPollMarkup(rawContent);
-        // Pre-process markdown ==highlight== syntax into <mark>
-        processedContent = processedContent.replace(/==([^=\n\r]+)==/g, '<mark class="hl-yellow">$1</mark>');
 
-        // 2. Render Markdown & sanitize (preserving mark and style attributes)
-        const html = typeof DOMPurify !== 'undefined' 
-            ? DOMPurify.sanitize(marked.parse(processedContent), { ADD_TAGS: ['mark'], ADD_ATTR: ['style', 'class'] }) 
-            : marked.parse(processedContent);
-        preview.innerHTML = html;
+        // Fallback if marked library failed to load or is unavailable
+        if (typeof marked === 'undefined') {
+            console.warn("Marked.js is not loaded. Displaying formatted text fallback.");
+            preview.innerHTML = `<div style="white-space: pre-wrap; font-family: var(--editor-font); color: var(--text-color);">${escapeHtml(rawContent)}</div>`;
+            return;
+        }
+
+        try {
+            // 1. Pre-process poll syntax into cyber poll cards & markdown highlights
+            let processedContent = typeof processPollMarkup === 'function' ? processPollMarkup(rawContent) : rawContent;
+            processedContent = processedContent.replace(/==([^=\n\r]+)==/g, '<mark class="hl-yellow">$1</mark>');
+
+            // 2. Render Markdown & sanitize (preserving mark and style attributes)
+            let parsed = '';
+            if (typeof marked.parse === 'function') {
+                parsed = marked.parse(processedContent);
+            } else if (typeof marked === 'function') {
+                parsed = marked(processedContent);
+            }
+
+            const html = typeof DOMPurify !== 'undefined' 
+                ? DOMPurify.sanitize(parsed, { ADD_TAGS: ['mark', 'svg', 'path', 'line', 'polygon', 'rect', 'circle'], ADD_ATTR: ['style', 'class', 'viewBox', 'xmlns', 'fill', 'stroke', 'stroke-width', 'data-poll-id', 'data-opt-idx'] }) 
+                : parsed;
+
+            preview.innerHTML = html || '<p style="color: var(--text-muted); font-style: italic;">(Empty note)</p>';
+        } catch (err) {
+            console.error("Markdown rendering error:", err);
+            preview.innerHTML = `<div style="white-space: pre-wrap; font-family: var(--editor-font); color: var(--text-color);">${escapeHtml(rawContent)}</div>`;
+        }
         
         // 3. Apply syntax highlighting to code blocks in preview
         if (typeof hljs !== 'undefined') {
-            preview.querySelectorAll('pre code').forEach((block) => {
-                if (!block.classList.contains('language-mermaid')) {
-                    try { hljs.highlightElement(block); } catch (e) {}
-                }
-            });
+            try {
+                preview.querySelectorAll('pre code').forEach((block) => {
+                    if (!block.classList.contains('language-mermaid')) {
+                        try { hljs.highlightElement(block); } catch (e) {}
+                    }
+                });
+            } catch (e) {}
         }
 
         // 4. Render Mermaid Diagrams
@@ -2597,15 +2658,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
 
         // 6. Wire interactive task list checkboxes
-        preview.querySelectorAll('input[type="checkbox"]').forEach((checkbox, idx) => {
-            checkbox.removeAttribute('disabled');
-            checkbox.addEventListener('change', (e) => {
-                toggleTaskInEditor(idx, e.target.checked);
+        try {
+            preview.querySelectorAll('input[type="checkbox"]').forEach((checkbox, idx) => {
+                checkbox.removeAttribute('disabled');
+                checkbox.addEventListener('change', (e) => {
+                    toggleTaskInEditor(idx, e.target.checked);
+                });
             });
-        });
+        } catch (e) {}
 
         // 7. Wire interactive poll click listeners
-        wirePollListeners();
+        if (typeof wirePollListeners === 'function') {
+            try { wirePollListeners(); } catch (e) {}
+        }
     }
 
     function toggleTaskInEditor(taskIndex, isChecked) {
@@ -4052,29 +4117,23 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
         if (isDrawTab) {
             if (canvasContainer) canvasContainer.classList.remove('hidden');
-            if (editor) editor.style.display = 'none';
-            if (preview) preview.style.display = 'none';
-            if (editorMirror) editorMirror.style.display = 'none';
             loadWhiteboardFromTab(tabsData[tid].content);
         } else {
             if (canvasContainer) canvasContainer.classList.add('hidden');
             if (editor) {
-                editor.style.display = '';
                 editor.value = tabsData[tid] ? tabsData[tid].content : '';
                 editor.readOnly = isReadOnly;
             }
-            if (preview) preview.style.display = (isMarkdown || isSplitMode) ? 'block' : 'none';
-            if (editorMirror) editorMirror.style.display = '';
             if (tabsData[tid] && tabsData[tid].content) {
                 triggerCipherGlitchAnimation(tabsData[tid].content);
             }
         }
 
+        updateViewVisibility();
         renderTabs();
-        updatePreview();
         isTyping = false;
         updateHUD();
-        if (editor && !isDrawTab) editor.focus();
+        if (editor && !isDrawTab && !isMarkdown) editor.focus();
         if (isFocusMode) scheduleFocusDimmingUpdate();
         if (privacyInspectorModal && !privacyInspectorModal.classList.contains('hidden')) updatePrivacyInspector();
         if (!skipSave) saveWorkspace();
@@ -4608,18 +4667,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         mdToggleBtn.addEventListener('click', () => {
             if (isSplitMode) return;
             isMarkdown = !isMarkdown;
+            updateViewVisibility();
             if (isMarkdown) {
-                updatePreview();
-                if (editor) editor.classList.add('hidden');
-                if (preview) preview.classList.remove('hidden');
                 mdToggleBtn.innerHTML = '<span>✏️ Edit View</span><kbd>Alt+M</kbd>';
             } else {
-                if (editor) {
-                    editor.classList.remove('hidden');
-                    editor.focus();
-                }
-                if (preview) preview.classList.add('hidden');
                 mdToggleBtn.innerHTML = '<span>👁️ Markdown Preview</span><kbd>Alt+M</kbd>';
+                if (editor) editor.focus();
             }
         });
     }
@@ -4628,29 +4681,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         splitToggleBtn.addEventListener('click', () => {
             isSplitMode = !isSplitMode;
             if (isSplitMode) {
-                document.body.classList.add('split-mode');
                 splitToggleBtn.innerHTML = '<span>💻 Single View</span><kbd>Alt+S</kbd>';
                 if (mdToggleBtn) {
                     mdToggleBtn.style.opacity = '0.4';
                     mdToggleBtn.style.pointerEvents = 'none';
                 }
-                if (editor) editor.classList.remove('hidden');
-                if (preview) preview.classList.remove('hidden');
-                updatePreview();
             } else {
-                document.body.classList.remove('split-mode');
                 splitToggleBtn.innerHTML = '<span>🌗 Split View</span><kbd>Alt+S</kbd>';
                 if (mdToggleBtn) {
                     mdToggleBtn.style.opacity = '1';
                     mdToggleBtn.style.pointerEvents = 'auto';
                 }
-                if (!isMarkdown) {
-                    if (preview) preview.classList.add('hidden');
-                } else {
-                    if (editor) editor.classList.add('hidden');
-                    if (preview) preview.classList.remove('hidden');
-                }
             }
+            updateViewVisibility();
         });
     }
 
