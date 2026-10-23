@@ -14,7 +14,7 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 - 👥 **Real-Time Isolated Multi-Pane Tab Sync:** Tabs created, deleted, or synchronized remotely update secondary split-note dropdown menus immediately without closing and reopening Pane 2.
 - 🎯 **Tab-Isolated Laser Pointers & Collaborative Presence:** Multi-user laser pointers and visual presence are now strictly isolated to their active note tab, preventing cross-tab pointer pollution during multi-note collaboration.
 - 📱 **Responsive Header & User Typing Indicators:** Collaborator typing badges and headers responsively adapt to compact and shrunk screens without truncating user names.
-- ⚡ **Auto-Purging PWA Cache Engine (v110):** Proactive client-side cache cleaner and instant controller reload for seamless PWA updates.
+- ⚡ **Auto-Purging PWA Cache Engine (v113):** Proactive client-side cache cleaner and instant controller reload for seamless PWA updates.
 
 ---
 

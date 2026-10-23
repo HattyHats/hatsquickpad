@@ -20,7 +20,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=112">
+    <link rel="stylesheet" href="style.css?v=113">
     
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -1392,13 +1392,13 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=112"></script>
+    <script src="app.js?v=113"></script>
     <script>
         // Auto-delete any legacy Service Worker caches immediately
         if (typeof window !== 'undefined' && 'caches' in window) {
             caches.keys().then((names) => {
                 names.forEach((name) => {
-                    if (name !== 'quickpad-v112') {
+                    if (name !== 'quickpad-v113') {
                         caches.delete(name);
                     }
                 });
@@ -1412,7 +1412,7 @@
                 }
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js?v=112')
+                navigator.serviceWorker.register('./sw.js?v=113')
                     .then((reg) => {
                         if (typeof reg.update === 'function') reg.update();
                         console.log('QuickPad SW active.');

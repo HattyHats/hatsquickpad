@@ -619,6 +619,7 @@ Everything you type is encrypted directly in your browser with AES-256 before le
 - **⚡ Command Palette:** Press \`Cmd+K\` (or \`Ctrl+K\`) for instant actions and recent notes.
 - **📄 Document Upload:** Upload or drag & drop Word documents (\`.docx\`), PDFs, Markdown, text, and code files to edit them directly.
 - **🎨 Markdown Preview:** Press \`Option+M\` / \`Cmd+M\` on Mac (or \`Alt+M\` on Windows) / \`Option+S\` for Split View.
+- **👥 2-Note Split View:** Press \`Option+2\` on Mac (or \`Alt+2\` on Windows) to edit two notes side-by-side.
 - **🎨 Whiteboard:** Add a new tab ending in \`.draw\` (e.g. \`sketch.draw\`) for real-time drawing.
 - **🔒 Secret Vault:** Right-click or lock any tab with a passphrase for nested privacy.
 - **🕶️ Panic Camouflage:** Press \`Alt+P\` or double-tap \`Esc\` to instantly disguise your screen.
@@ -3145,6 +3146,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             if (savedActive && tabsData[savedActive]) {
                                 activeTabId = savedActive;
                             }
+                            upgradeExistingGuideTabs();
                             if (editor && tabsData[activeTabId]) {
                                 editor.value = tabsData[activeTabId].content || '';
                             }
@@ -4067,6 +4069,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         }
                                     }
                                 }
+                            }
+                            
+                            // Auto-upgrade any legacy or stale guide tabs to v4.5 Pro
+                            const didUpgradeGuides = upgradeExistingGuideTabs();
+                            if (didUpgradeGuides) {
+                                tabsUpdated = true;
+                                saveWorkspace();
                             }
                             
                             if (!tabsData[activeTabId]) {
@@ -6740,6 +6749,54 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         }
     });
 
+    // --- Automatic Guide Upgrader (v4.5 Pro) ---
+    function upgradeExistingGuideTabs() {
+        if (!tabsData || typeof tabsData !== 'object') return false;
+        let upgraded = false;
+        for (let tid in tabsData) {
+            const tab = tabsData[tid];
+            if (!tab || typeof tab.content !== 'string') continue;
+
+            const isGuideTab = (tab.name === 'Guide ⚡' || tab.name === 'Guide');
+            const hasOlderGuideHeader = /^#\s*⚡?\s*Welcome to QuickPad v[0-9]+(\.[0-9]+)?(\s*Pro)?/im.test(tab.content);
+            const hasExactV45 = tab.content.includes('# ⚡ Welcome to QuickPad v4.5 Pro');
+
+            if (isGuideTab && !hasExactV45) {
+                tab.name = 'Guide ⚡';
+                tab.content = WELCOME_CHECKLIST_TEMPLATE;
+                dirtyTabIds.add(tid);
+                upgraded = true;
+            } else if (hasOlderGuideHeader && !hasExactV45) {
+                if (isGuideTab || !tab.content.includes('2-Note Split View')) {
+                    tab.content = WELCOME_CHECKLIST_TEMPLATE;
+                } else {
+                    tab.content = tab.content.replace(/^#\s*⚡?\s*Welcome to QuickPad v[0-9]+(\.[0-9]+)?(\s*Pro)?/im, '# ⚡ Welcome to QuickPad v4.5 Pro');
+                }
+                dirtyTabIds.add(tid);
+                upgraded = true;
+            }
+        }
+
+        if (upgraded) {
+            tabsContentDirty = true;
+            if (editor && tabsData[activeTabId]) {
+                editor.value = tabsData[activeTabId].content || '';
+                if (typeof updatePreview === 'function') updatePreview();
+                if (typeof updateHUD === 'function') updateHUD();
+            }
+            if (multiNoteMode === 2 && multiPaneTabs && multiPaneTabs.pane2 && tabsData[multiPaneTabs.pane2] && multiPane2Editor) {
+                multiPane2Editor.value = tabsData[multiPaneTabs.pane2].content || '';
+                if (typeof updateMultiPanePreview === 'function') updateMultiPanePreview(2);
+            }
+            if (currentToken) {
+                try {
+                    localStorage.setItem('quickpad_cached_tabs_' + currentToken, JSON.stringify(tabsData));
+                } catch(e){}
+            }
+        }
+        return upgraded;
+    }
+
     // --- Interactive Example Note & Guide Loader ---
     function loadExampleGuide() {
         const activeTab = tabsData[activeTabId];
@@ -6748,24 +6805,34 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             activeTab.name = 'Guide ⚡';
             activeTab.content = WELCOME_CHECKLIST_TEMPLATE;
             if (editor) editor.value = WELCOME_CHECKLIST_TEMPLATE;
+            dirtyTabIds.add(activeTabId);
             renderTabs();
             updateHUD();
             updatePreview();
             tabsContentDirty = true;
             saveWorkspace();
-            showToast("Example Guide loaded into workspace", "success");
+            showToast("Example Guide (v4.5 Pro) loaded into workspace", "success");
         } else {
             // Check if a Guide tab already exists
             let existingGuideTid = null;
             for (let tid in tabsData) {
-                if (tabsData[tid].name === 'Guide ⚡') {
+                if (tabsData[tid].name === 'Guide ⚡' || tabsData[tid].name === 'Guide' || (tabsData[tid].content && tabsData[tid].content.includes('Welcome to QuickPad'))) {
                     existingGuideTid = tid;
                     break;
                 }
             }
             if (existingGuideTid) {
+                tabsData[existingGuideTid].name = 'Guide ⚡';
+                tabsData[existingGuideTid].content = WELCOME_CHECKLIST_TEMPLATE;
+                dirtyTabIds.add(existingGuideTid);
+                tabsContentDirty = true;
                 switchTab(existingGuideTid);
-                showToast("Switched to Example Guide tab", "info");
+                if (editor) editor.value = WELCOME_CHECKLIST_TEMPLATE;
+                renderTabs();
+                updatePreview();
+                updateHUD();
+                saveWorkspace();
+                showToast("Updated and switched to Example Guide (v4.5 Pro)", "success");
             } else {
                 const guideTid = 'guide_' + Date.now();
                 tabsData[guideTid] = {
@@ -6776,9 +6843,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 renderTabs();
                 switchTab(guideTid);
                 tabsContentDirty = true;
-                dirtyTabIds.add(activeTabId);
+                dirtyTabIds.add(guideTid);
                 saveWorkspace();
-                showToast("Opened Example Guide in a new tab", "success");
+                showToast("Opened Example Guide (v4.5 Pro) in a new tab", "success");
             }
         }
     }
