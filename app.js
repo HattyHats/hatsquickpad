@@ -21,7 +21,16 @@
 
     // iOS Keyboard Dismiss Fix
     window.addEventListener('focusout', () => window.scrollTo(0, 0));
-    window.addEventListener('hashchange', () => window.location.reload());
+
+    let isAppInitialized = false;
+    let lastKnownHash = window.location.hash;
+    window.addEventListener('hashchange', () => {
+        if (!isAppInitialized) return;
+        if (window.location.hash !== lastKnownHash) {
+            lastKnownHash = window.location.hash;
+            window.location.reload();
+        }
+    });
 
     // Firebase Initialization (Compat mode for universal file:// and HTTPS compatibility)
     const firebaseConfig = {
@@ -144,6 +153,24 @@
     const tabsBar = document.getElementById('tabs-bar');
     const tabsContainer = document.getElementById('tabs-container');
     const addTabBtn = document.getElementById('add-tab-btn');
+    const splitNotesBtn = document.getElementById('split-notes-btn');
+    const multiNote2Btn = document.getElementById('multi-note-2-btn');
+    const multiPane1Header = document.getElementById('multi-pane-1-header');
+    const multiPane1Title = document.getElementById('multi-pane-1-title');
+    const multiPane1SingleBtn = document.getElementById('multi-pane-1-single-btn');
+    const multiPane2 = document.getElementById('multi-pane-2');
+    const multiPane2Select = document.getElementById('multi-pane-2-select');
+    const multiPane2MdBtn = document.getElementById('multi-pane-2-md-btn');
+    const multiPane2CloseBtn = document.getElementById('multi-pane-2-close-btn');
+    const multiPane2Editor = document.getElementById('multi-pane-2-editor');
+    const multiPane2Preview = document.getElementById('multi-pane-2-preview');
+    const tabContextMenu = document.getElementById('tab-context-menu');
+    const tabCtxSplit = document.getElementById('tab-ctx-split');
+    const tabCtxMoveLeft = document.getElementById('tab-ctx-move-left');
+    const tabCtxMoveRight = document.getElementById('tab-ctx-move-right');
+    const tabCtxRename = document.getElementById('tab-ctx-rename');
+    const tabCtxLock = document.getElementById('tab-ctx-lock');
+    const tabCtxDelete = document.getElementById('tab-ctx-delete');
     const liveHud = document.getElementById('live-hud');
     const hudChars = document.getElementById('hud-chars');
     const hudWords = document.getElementById('hud-words');
@@ -325,12 +352,54 @@
     let urlKey = null;
     let vaultPassword = null;
     let debounceTimeout = null;
+    let saveMaxWaitTimer = null;
+    const SAVE_DEBOUNCE_MS = 300;
+    const SAVE_MAX_WAIT_MS = 1000;
+
+    function scheduleWorkspaceSave() {
+        if (isReadOnly || isBurnMode) return;
+        if (debounceTimeout) clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => {
+            if (saveMaxWaitTimer) {
+                clearTimeout(saveMaxWaitTimer);
+                saveMaxWaitTimer = null;
+            }
+            saveWorkspace();
+        }, SAVE_DEBOUNCE_MS);
+
+        if (!saveMaxWaitTimer) {
+            saveMaxWaitTimer = setTimeout(() => {
+                saveMaxWaitTimer = null;
+                if (debounceTimeout) {
+                    clearTimeout(debounceTimeout);
+                    debounceTimeout = null;
+                }
+                saveWorkspace();
+            }, SAVE_MAX_WAIT_MS);
+        }
+    }
+
     let unsubscribeWorkspace = null;
     let timerMinutes = null;
     let countdownInterval = null;
     let isTyping = false;
+    let typingTabId = null;
+    const dirtyTabIds = new Set();
+    let isTabOrderDirty = false;
+
+    function isTypingInTab(tid) {
+        return isTyping && (typingTabId === tid);
+    }
     let activeTabId = 'main';
     let tabsData = { 'main': { name: 'main.txt', content: '', is_encrypted: false } };
+    let tabOrder = ['main'];
+    let draggedTabId = null;
+    let contextMenuTabId = null;
+
+    // Multi-Note Side-by-Side View State (Max 2 notes open simultaneously)
+    let multiNoteMode = 1; // 1 = Single Note, 2 = 2 Notes Side-by-Side
+    let multiPaneTabs = { pane2: null };
+    let multiPanePreviews = { pane2: false };
     let lastSyncedServerTabs = {};
     let lastSavedTabsJSON = "";
     let tabsContentDirty = false;
@@ -405,8 +474,8 @@
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
 
-    // v4.3 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.3 Pro
+    // v4.4 Pro Welcome Template
+    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.4 Pro
 
 Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
 Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
@@ -817,21 +886,6 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     if (panicBtn) panicBtn.addEventListener('click', () => togglePanicMode(true));
     if (panicExitBtn) panicExitBtn.addEventListener('click', () => togglePanicMode(false));
 
-    window.addEventListener('keydown', (e) => {
-        const isP = e.code === 'KeyP' || e.key.toLowerCase() === 'p' || e.key === 'π';
-        if (e.altKey && isP) {
-            e.preventDefault();
-            togglePanicMode();
-        }
-        if (e.key === 'Escape') {
-            const now = Date.now();
-            if (now - lastEscapeTime < 350) {
-                togglePanicMode();
-            }
-            lastEscapeTime = now;
-        }
-    });
-
     // 6. --- Duress PIN / Decoy Vault ---
     if (duressBtn) {
         duressBtn.addEventListener('click', () => {
@@ -899,6 +953,10 @@ Everything you type is encrypted directly in your browser with AES-256 before le
                 editor.value = editor.value.substring(0, start) + tag + editor.value.substring(end);
                 editor.selectionStart = editor.selectionEnd = start + tag.length;
                 if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                multiPane2Editor.value = editor.value;
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
                 updatePreview();
                 updateHUD();
                 saveWorkspace();
@@ -2027,6 +2085,10 @@ Everything you type is encrypted directly in your browser with AES-256 before le
                     editor.value = editor.value.substring(0, cursor) + text + ' ' + editor.value.substring(editor.selectionEnd || cursor);
                     editor.selectionStart = editor.selectionEnd = cursor + text.length + 1;
                     if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                multiPane2Editor.value = editor.value;
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
                     if (typeof debouncedSave === 'function') debouncedSave();
                     else saveWorkspace();
                 } else {
@@ -2396,10 +2458,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         localStorage.setItem('quickpad_font_family', family);
         localStorage.setItem('quickpad_font_size', size);
 
-        for (let cid in peerCursorsData) {
-            if (peerCursorsData[cid] && peerCursorsData[cid].tabId === activeTabId) {
-                renderPeerCursor(cid, peerCursorsData[cid].pos, peerCursorsData[cid].name);
-            }
+        if (typeof updateAllVisiblePeerCursors === 'function') {
+            updateAllVisiblePeerCursors();
         }
     }
 
@@ -2518,29 +2578,90 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
     }
 
+    function updateViewVisibility() {
+        if (!editor || !preview) return;
+        const isDrawTab = activeTabId && tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
+
+        if (isDrawTab) {
+            editor.classList.add('hidden');
+            editor.style.display = 'none';
+            preview.classList.add('hidden');
+            preview.style.display = 'none';
+            if (editorMirror) editorMirror.style.display = 'none';
+            return;
+        }
+
+        if (isSplitMode) {
+            document.body.classList.add('split-mode');
+            editor.classList.remove('hidden');
+            editor.style.display = '';
+            preview.classList.remove('hidden');
+            preview.style.display = 'block';
+            if (editorMirror) editorMirror.style.display = '';
+            updatePreview();
+        } else if (isMarkdown) {
+            document.body.classList.remove('split-mode');
+            editor.classList.add('hidden');
+            editor.style.display = 'none';
+            preview.classList.remove('hidden');
+            preview.style.display = 'block';
+            if (editorMirror) editorMirror.style.display = 'none';
+            updatePreview();
+        } else {
+            document.body.classList.remove('split-mode');
+            editor.classList.remove('hidden');
+            editor.style.display = '';
+            preview.classList.add('hidden');
+            preview.style.display = 'none';
+            if (editorMirror) editorMirror.style.display = '';
+        }
+    }
+
     function updatePreview() {
         if (!isMarkdown && !isSplitMode) return;
-        if (typeof marked === 'undefined' || !preview || !editor) return;
+        if (!preview || !editor) return;
         
-        // 1. Pre-process poll syntax into cyber poll cards & markdown highlights
         const rawContent = editor.value || '';
-        let processedContent = processPollMarkup(rawContent);
-        // Pre-process markdown ==highlight== syntax into <mark>
-        processedContent = processedContent.replace(/==([^=\n\r]+)==/g, '<mark class="hl-yellow">$1</mark>');
 
-        // 2. Render Markdown & sanitize (preserving mark and style attributes)
-        const html = typeof DOMPurify !== 'undefined' 
-            ? DOMPurify.sanitize(marked.parse(processedContent), { ADD_TAGS: ['mark'], ADD_ATTR: ['style', 'class'] }) 
-            : marked.parse(processedContent);
-        preview.innerHTML = html;
+        // Fallback if marked library failed to load or is unavailable
+        if (typeof marked === 'undefined') {
+            console.warn("Marked.js is not loaded. Displaying formatted text fallback.");
+            preview.innerHTML = `<div style="white-space: pre-wrap; font-family: var(--editor-font); color: var(--text-color);">${escapeHtml(rawContent)}</div>`;
+            return;
+        }
+
+        try {
+            // 1. Pre-process poll syntax into cyber poll cards & markdown highlights
+            let processedContent = typeof processPollMarkup === 'function' ? processPollMarkup(rawContent) : rawContent;
+            processedContent = processedContent.replace(/==([^=\n\r]+)==/g, '<mark class="hl-yellow">$1</mark>');
+
+            // 2. Render Markdown & sanitize (preserving mark and style attributes)
+            let parsed = '';
+            if (typeof marked.parse === 'function') {
+                parsed = marked.parse(processedContent);
+            } else if (typeof marked === 'function') {
+                parsed = marked(processedContent);
+            }
+
+            const html = typeof DOMPurify !== 'undefined' 
+                ? DOMPurify.sanitize(parsed, { ADD_TAGS: ['mark', 'svg', 'path', 'line', 'polygon', 'rect', 'circle'], ADD_ATTR: ['style', 'class', 'viewBox', 'xmlns', 'fill', 'stroke', 'stroke-width', 'data-poll-id', 'data-opt-idx'] }) 
+                : parsed;
+
+            preview.innerHTML = html || '<p style="color: var(--text-muted); font-style: italic;">(Empty note)</p>';
+        } catch (err) {
+            console.error("Markdown rendering error:", err);
+            preview.innerHTML = `<div style="white-space: pre-wrap; font-family: var(--editor-font); color: var(--text-color);">${escapeHtml(rawContent)}</div>`;
+        }
         
         // 3. Apply syntax highlighting to code blocks in preview
         if (typeof hljs !== 'undefined') {
-            preview.querySelectorAll('pre code').forEach((block) => {
-                if (!block.classList.contains('language-mermaid')) {
-                    try { hljs.highlightElement(block); } catch (e) {}
-                }
-            });
+            try {
+                preview.querySelectorAll('pre code').forEach((block) => {
+                    if (!block.classList.contains('language-mermaid')) {
+                        try { hljs.highlightElement(block); } catch (e) {}
+                    }
+                });
+            } catch (e) {}
         }
 
         // 4. Render Mermaid Diagrams
@@ -2588,15 +2709,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
 
         // 6. Wire interactive task list checkboxes
-        preview.querySelectorAll('input[type="checkbox"]').forEach((checkbox, idx) => {
-            checkbox.removeAttribute('disabled');
-            checkbox.addEventListener('change', (e) => {
-                toggleTaskInEditor(idx, e.target.checked);
+        try {
+            preview.querySelectorAll('input[type="checkbox"]').forEach((checkbox, idx) => {
+                checkbox.removeAttribute('disabled');
+                checkbox.addEventListener('change', (e) => {
+                    toggleTaskInEditor(idx, e.target.checked);
+                });
             });
-        });
+        } catch (e) {}
 
         // 7. Wire interactive poll click listeners
-        wirePollListeners();
+        if (typeof wirePollListeners === 'function') {
+            try { wirePollListeners(); } catch (e) {}
+        }
     }
 
     function toggleTaskInEditor(taskIndex, isChecked) {
@@ -2799,6 +2924,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (mdToggleBtn) mdToggleBtn.style.display = 'none';
             if (burnBtn) burnBtn.style.display = 'none';
             if (instantBurnBtn) instantBurnBtn.style.display = 'none';
+            if (shareBtn) shareBtn.style.display = 'none';
             if (tabsBar) tabsBar.style.display = 'none';
             if (liveHud) liveHud.style.display = 'none';
             if (editor) editor.readOnly = true;
@@ -2883,6 +3009,25 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (tabsBar) tabsBar.classList.remove('hidden');
             if (liveHud) liveHud.classList.remove('hidden');
             renderTabs();
+            if (currentToken) {
+                try {
+                    const savedOrder = localStorage.getItem('quickpad_tab_order_' + currentToken);
+                    if (savedOrder) {
+                        const parsed = JSON.parse(savedOrder);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            tabOrder = parsed;
+                            ensureTabOrder();
+                            renderTabs();
+                        }
+                    }
+                } catch(e){}
+                try {
+                    const savedMulti = localStorage.getItem('quickpad_multi_note_' + currentToken);
+                    if (savedMulti && savedMulti === '2') {
+                        setTimeout(() => setMultiNoteLayout(2), 100);
+                    }
+                } catch(e){}
+            }
             initBroadcastSync(currentToken);
             setupRealtimeSync(currentToken);
         }
@@ -2916,7 +3061,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             let scrollLeft = 0;
 
             container.addEventListener('mousedown', (e) => {
-                if (e.target.closest('button, input, select, a, .flare-btn, .dropdown-group')) return;
+                if (e.target.closest('button, input, select, a, .flare-btn, .dropdown-group, .tab')) return;
                 isDown = true;
                 startX = e.pageX - container.offsetLeft;
                 scrollLeft = container.scrollLeft;
@@ -2938,11 +3083,24 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 container.scrollLeft = scrollLeft - walk;
             });
         });
+
+        setTimeout(() => {
+            isAppInitialized = true;
+            lastKnownHash = window.location.hash;
+        }, 500);
     }
 
     function generateToken() { 
         return Math.random().toString(36).substring(2, 12) + '_' + Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12); 
     }
+
+    function createNewWorkspace() {
+        try { localStorage.removeItem('quickpad_last_active_hash'); } catch(e){}
+        const freshToken = generateToken();
+        try { localStorage.setItem('quickpad_last_active_hash', freshToken); } catch(e){}
+        window.location.href = window.location.origin + window.location.pathname + '#' + freshToken;
+    }
+    window.createNewWorkspace = createNewWorkspace;
 
     // --- Local Multi-Tab Real-Time Sync Engine (BroadcastChannel) ---
     function initBroadcastSync(token) {
@@ -2966,10 +3124,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             tabsData[data.tid].content = data.content;
                             lastSavedTabsJSON = JSON.stringify(tabsData);
                             lastSyncedServerTabs[data.tid] = { content: data.content };
-                            tabsContentDirty = false;
+                            dirtyTabIds.delete(data.tid);
                             if (data.tid === activeTabId) {
                                 const isFocused = (document.activeElement === editor);
-                                if (!isTyping || !isFocused) {
+                                if (!isTypingInTab(data.tid) || !isFocused) {
                                     const isDraw = tabsData[data.tid].name && tabsData[data.tid].name.endsWith('.draw');
                                     if (isDraw) {
                                         if (typeof wbIsDrawing !== 'undefined' && !wbIsDrawing) {
@@ -2989,9 +3147,28 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     }
                                 }
                             }
+
+                            // Secondary Editor (Pane 2)
+                            if (multiNoteMode === 2 && multiPaneTabs.pane2 === data.tid && multiPane2Editor) {
+                                const isP2Focused = (document.activeElement === multiPane2Editor);
+                                if (!isTypingInTab(data.tid) || !isP2Focused) {
+                                    if (isP2Focused) {
+                                        const start = multiPane2Editor.selectionStart;
+                                        const end = multiPane2Editor.selectionEnd;
+                                        multiPane2Editor.value = data.content;
+                                        multiPane2Editor.setSelectionRange(start, end);
+                                    } else {
+                                        multiPane2Editor.value = data.content;
+                                    }
+                                    if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+                                }
+                            }
                         }
                     } else if (data.type === 'tabs_structure') {
                     if (data.tabs) {
+                        if (data.tab_order && Array.isArray(data.tab_order) && data.tab_order.length > 0) {
+                            tabOrder = data.tab_order;
+                        }
                         for (let tid in data.tabs) {
                             if (!tabsData[tid]) {
                                 tabsData[tid] = data.tabs[tid];
@@ -3003,8 +3180,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
                             }
                         }
+                        ensureTabOrder();
                         lastSavedTabsJSON = JSON.stringify(tabsData);
                         renderTabs();
+                        updateMultiPaneSelectors();
                         if (typeof checkLockedTabUI === 'function') checkLockedTabUI(activeTabId);
                         if (tabsData[activeTabId] && editor && (!tabsData[activeTabId].is_secret || tabsData[activeTabId].secret_pass)) {
                             editor.value = tabsData[activeTabId].content || '';
@@ -3025,8 +3204,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             timestamp: data.cursor.timestamp || Date.now(),
                             isLocalTab: true
                         };
-                        if (data.cursor.tabId === activeTabId) {
-                            renderPeerCursor(data.senderId, data.cursor.pos, data.cursor.name);
+                        const tabId = data.cursor.tabId || 'main';
+                        const isVisibleInPane1 = (tabId === activeTabId);
+                        const isVisibleInPane2 = (multiNoteMode === 2 && multiPaneTabs.pane2 === tabId);
+                        if (isVisibleInPane1 || isVisibleInPane2) {
+                            renderPeerCursor(data.senderId, data.cursor.pos, data.cursor.name, tabId);
+                        } else {
+                            removePeerCursor(data.senderId);
                         }
                         if (typeof updatePresenceUI === 'function') {
                             updatePresenceUI();
@@ -3208,20 +3392,23 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     </div>
                 `;
             });
-            peerAvatarsList.innerHTML = peersHtml;
+            if (peerAvatarsList.dataset.renderedHtml !== peersHtml) {
+                peerAvatarsList.dataset.renderedHtml = peersHtml;
+                peerAvatarsList.innerHTML = peersHtml;
 
-            // Attach chat & DM listeners
-            peerAvatarsList.querySelectorAll('.peer-avatar-wrapper').forEach(wrap => {
-                const cid = wrap.getAttribute('data-cid');
-                const name = wrap.getAttribute('data-name');
-                const triggerChat = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    window.openChat(cid, name);
-                };
-                wrap.addEventListener('click', triggerChat);
-                wrap.addEventListener('touchend', triggerChat);
-            });
+                // Attach chat & DM listeners
+                peerAvatarsList.querySelectorAll('.peer-avatar-wrapper').forEach(wrap => {
+                    const cid = wrap.getAttribute('data-cid');
+                    const name = wrap.getAttribute('data-name');
+                    const triggerChat = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.openChat(cid, name);
+                    };
+                    wrap.addEventListener('click', triggerChat);
+                    wrap.addEventListener('touchend', triggerChat);
+                });
+            }
         }
     }
 
@@ -3251,6 +3438,96 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             updatePresenceUI();
         }
     }, 4000);
+
+    // --- Non-Blocking Real-Time 3-Way Concurrent Merge Engine ---
+    function computeChange(oldStr, newStr) {
+        if (oldStr === newStr) return null;
+        let p = 0;
+        const minLen = Math.min(oldStr.length, newStr.length);
+        while (p < minLen && oldStr.charCodeAt(p) === newStr.charCodeAt(p)) {
+            p++;
+        }
+        let sOld = oldStr.length;
+        let sNew = newStr.length;
+        while (sOld > p && sNew > p && oldStr.charCodeAt(sOld - 1) === newStr.charCodeAt(sNew - 1)) {
+            sOld--;
+            sNew--;
+        }
+        return {
+            start: p,
+            delCount: sOld - p,
+            insertedText: newStr.substring(p, sNew)
+        };
+    }
+
+    function mergeConcurrentEdits(base, local, remote, localCursor = 0) {
+        base = base || '';
+        local = local || '';
+        remote = remote || '';
+        localCursor = typeof localCursor === 'number' ? localCursor : 0;
+
+        if (base === local) return { text: remote, cursor: Math.min(localCursor, remote.length) };
+        if (base === remote) return { text: local, cursor: Math.min(localCursor, local.length) };
+        if (local === remote) return { text: local, cursor: Math.min(localCursor, local.length) };
+
+        // If one contains the other, prefer the superset
+        if (local.includes(remote)) {
+            return { text: local, cursor: localCursor };
+        }
+        if (remote.includes(local)) {
+            return { text: remote, cursor: Math.min(localCursor, remote.length) };
+        }
+
+        const cLocal = computeChange(base, local);
+        const cRemote = computeChange(base, remote);
+
+        if (!cLocal) return { text: remote, cursor: Math.min(localCursor, remote.length) };
+        if (!cRemote) return { text: local, cursor: Math.min(localCursor, local.length) };
+
+        // Case 1: Remote change is strictly after local change
+        if (cRemote.start >= cLocal.start + cLocal.delCount) {
+            const localDelta = cLocal.insertedText.length - cLocal.delCount;
+            const adjustedRemoteStart = cRemote.start + localDelta;
+            const targetEnd = adjustedRemoteStart + cRemote.delCount;
+
+            const merged = local.substring(0, adjustedRemoteStart) + 
+                           cRemote.insertedText + 
+                           local.substring(Math.min(targetEnd, local.length));
+
+            let newCursor = localCursor;
+            if (localCursor > adjustedRemoteStart) {
+                newCursor += (cRemote.insertedText.length - cRemote.delCount);
+            }
+            return { text: merged, cursor: Math.max(0, Math.min(newCursor, merged.length)) };
+        }
+
+        // Case 2: Remote change is strictly before local change
+        if (cRemote.start + cRemote.delCount <= cLocal.start) {
+            const remoteDelta = cRemote.insertedText.length - cRemote.delCount;
+            const targetEnd = cRemote.start + cRemote.delCount;
+
+            const merged = local.substring(0, cRemote.start) + 
+                           cRemote.insertedText + 
+                           local.substring(Math.min(targetEnd, local.length));
+
+            let newCursor = localCursor;
+            if (localCursor >= cRemote.start) {
+                newCursor += remoteDelta;
+            }
+            return { text: merged, cursor: Math.max(0, Math.min(newCursor, merged.length)) };
+        }
+
+        // Case 3: Overlapping changes in the same region (e.g. concurrent appends)
+        if (cLocal.start >= base.length && cRemote.start >= base.length) {
+            const sep = (base.endsWith('\n') || cRemote.insertedText.endsWith('\n') || cLocal.insertedText.startsWith('\n')) ? '' : '\n';
+            const merged = base + cRemote.insertedText + sep + cLocal.insertedText;
+            return { text: merged, cursor: merged.length };
+        }
+
+        // Interleaved non-destructive combination (keep both lines)
+        const merged = local + '\n' + cRemote.insertedText;
+        return { text: merged, cursor: localCursor };
+    }
 
     // --- Real-Time Firestore Synchronization ---
     let lastSeenServerTimestamp = 0;
@@ -3297,12 +3574,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             if (data.expires_at && Date.now() > data.expires_at && !data.burned) {
                                 db.collection("workspaces").doc(token).set({ burned: true }, { merge: true });
                             }
+                            try {
+                                localStorage.removeItem('quickpad_last_active_hash');
+                                localStorage.removeItem(`qp_cached_${token}`);
+                                localStorage.removeItem(`qp_active_tab_${token}`);
+                            } catch(e) {}
+                            window.history.replaceState({}, '', window.location.origin + window.location.pathname);
                             document.body.innerHTML = `
                                 <div style='height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#050811;color:#fff;'>
                                     <div class='splash-badge' style='margin-bottom:15px;color:#ff0055;border-color:rgba(255,0,85,0.4);'>ZERO-TRACE ACTIVE</div>
                                     <h1 class='glitch-text' data-text='WORKSPACE BURNED' style='color:#ff0055;text-shadow:0 0 24px rgba(255,0,85,0.6);margin-bottom:20px;'>WORKSPACE BURNED</h1>
                                     <p style='color:#94a3b8;font-family:monospace;margin-bottom:30px;max-width:400px;text-align:center;'>This workspace reached its expiration timer or was deleted. All ciphertext was eradicated.</p>
-                                    <button onclick="window.location.href=window.location.origin+window.location.pathname" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;">Create New Pad</button>
+                                    <button onclick="if(window.createNewWorkspace){window.createNewWorkspace();}else{try{localStorage.removeItem('quickpad_last_active_hash');}catch(e){};var t=(Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12));try{localStorage.setItem('quickpad_last_active_hash',t);}catch(e){};window.location.href=window.location.origin+window.location.pathname+'#'+t;}" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;cursor:pointer;">Create New Pad</button>
                                 </div>`;
                             return;
                         }
@@ -3334,6 +3617,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
                         // Synchronize workspace tabs if tabs or legacy content are present in the snapshot (skip if self writer to avoid clobbering editor)
                         if (!isSelfWriter && (data.tabs || data.content)) {
+                            let tabsUpdated = false;
+                            if (Array.isArray(data.tab_order) && data.tab_order.length > 0) {
+                                if (JSON.stringify(tabOrder) !== JSON.stringify(data.tab_order)) {
+                                    tabOrder = data.tab_order;
+                                    tabsUpdated = true;
+                                }
+                            }
                             let serverTabs = data.tabs || {};
                             if (data.content && !data.tabs) serverTabs = { 'main': { name: 'main.txt', content: data.content, is_encrypted: data.is_encrypted } };
                             
@@ -3361,8 +3651,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
                                 serverTabs[tid].content = content;
                             }
-
-                            let tabsUpdated = false;
 
                             // Self-Healing: Deduplicate duplicate tabs with the same name (e.g. phantom duplicates created by race conditions)
                             const nameToTids = {};
@@ -3449,6 +3737,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         updatePreview();
                                         updateHUD();
                                     }
+                                    if (multiNoteMode === 2 && multiPaneTabs.pane2 === tid && multiPane2Editor) {
+                                        if (!isServerSecret || tabsData[tid].secret_pass) {
+                                            multiPane2Editor.value = content;
+                                            multiPane2Editor.readOnly = isReadOnly;
+                                        }
+                                        if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+                                    }
                                 } else {
                                     if (tabsData[tid].name !== sTab.name) { 
                                         tabsData[tid].name = sTab.name; 
@@ -3473,39 +3768,72 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         continue;
                                     }
 
-                                    let localContent = tabsData[tid].content;
+                                    let localContent = tabsData[tid].content || '';
                                     let baseContent = lastSyncedServerTabs[tid] ? lastSyncedServerTabs[tid].content : '';
-                                    let normLocal = (localContent || '').replace(/\r\n/g, '\n').trimEnd();
-                                    let normServer = (content || '').replace(/\r\n/g, '\n').trimEnd();
-                                    let normBase = (baseContent || '').replace(/\r\n/g, '\n').trimEnd();
-                                    
-                                    let localChanged = (normLocal.trim() !== '') && (normLocal !== normBase);
-                                    let serverChanged = normServer !== normBase;
+                                    let normLocal = localContent.replace(/\r\n/g, '\n').trimEnd();
+                                    let normServer = content.replace(/\r\n/g, '\n').trimEnd();
 
-                                    if (localChanged && serverChanged && normLocal !== normServer) {
-                                        if (mergeModal && !mergeModal.classList.contains('hidden')) return;
-                                        showMergeModal(tid, content, localContent);
-                                    } else if (localChanged && !serverChanged) {
-                                        // Local changes pending; will be saved via debounced input save (prevents write ping-pong loop)
-                                    } else if (serverChanged && !localChanged) {
-                                        tabsData[tid].content = content; 
-                                        tabsContentDirty = false;
-                                        if (tid === activeTabId && (!isTyping || document.activeElement !== editor)) {
+                                    const serverChanged = (normServer !== normLocal);
+                                    const isDirtyLocally = dirtyTabIds.has(tid);
+                                    const isCurrentlyTypingInThisTab = isTypingInTab(tid);
+
+                                    if (serverChanged) {
+                                        let finalContent = content;
+                                        let newCursorPos = null;
+
+                                        if (isDirtyLocally && isCurrentlyTypingInThisTab) {
+                                            // Non-blocking 3-way concurrent merge!
+                                            const activeTextarea = (tid === activeTabId) ? editor : ((multiNoteMode === 2 && multiPaneTabs.pane2 === tid) ? multiPane2Editor : null);
+                                            const currentCursor = activeTextarea ? activeTextarea.selectionStart || 0 : 0;
+
+                                            const mergeResult = mergeConcurrentEdits(baseContent, localContent, content, currentCursor);
+                                            finalContent = mergeResult.text;
+                                            newCursorPos = mergeResult.cursor;
+
+                                            tabsData[tid].content = finalContent;
+                                            dirtyTabIds.add(tid);
+                                            tabsContentDirty = true;
+                                            scheduleWorkspaceSave();
+                                        } else {
+                                            // Clean authoritative update from server
+                                            finalContent = content;
+                                            tabsData[tid].content = finalContent;
+                                            dirtyTabIds.delete(tid);
+                                        }
+
+                                        // 1. Primary Editor
+                                        if (tid === activeTabId) {
                                             if (typeof checkLockedTabUI === 'function') checkLockedTabUI(tid);
                                             const isDraw = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
                                             if (isDraw) {
                                                 if (typeof wbIsDrawing !== 'undefined' && !wbIsDrawing) {
-                                                    loadWhiteboardFromTab(content);
+                                                    loadWhiteboardFromTab(finalContent);
                                                 }
                                             } else if (editor) {
-                                                let cursor = editor.selectionStart || 0;
-                                                editor.value = content;
+                                                const isFocused = (document.activeElement === editor);
+                                                const cursor = (newCursorPos !== null) ? newCursorPos : (editor.selectionStart || 0);
+                                                editor.value = finalContent;
                                                 editor.readOnly = isReadOnly;
-                                                const safePos = Math.min(cursor, content.length);
-                                                editor.setSelectionRange(safePos, safePos);
+                                                if (isFocused) {
+                                                    const safePos = Math.min(cursor, finalContent.length);
+                                                    editor.setSelectionRange(safePos, safePos);
+                                                }
                                                 updatePreview();
-                                                updateHUD(); 
+                                                updateHUD();
                                             }
+                                        }
+
+                                        // 2. Secondary Editor (Pane 2)
+                                        if (multiNoteMode === 2 && multiPaneTabs.pane2 === tid && multiPane2Editor) {
+                                            const isP2Focused = (document.activeElement === multiPane2Editor);
+                                            const pCursor = (newCursorPos !== null) ? newCursorPos : (multiPane2Editor.selectionStart || 0);
+                                            multiPane2Editor.value = finalContent;
+                                            multiPane2Editor.readOnly = isReadOnly;
+                                            if (isP2Focused) {
+                                                const safePos = Math.min(pCursor, finalContent.length);
+                                                multiPane2Editor.setSelectionRange(safePos, safePos);
+                                            }
+                                            if (multiPanePreviews.pane2) updateMultiPanePreview(2);
                                         }
                                     }
                                 }
@@ -3605,8 +3933,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     pubKey: c.pubKey || null
                                 });
                                 
-                                if (c.tabId === activeTabId) renderPeerCursor(cid, c.pos, c.name);
-                                else removePeerCursor(cid);
+                                const isVisibleInPane1 = (c.tabId === activeTabId);
+                                const isVisibleInPane2 = (multiNoteMode === 2 && multiPaneTabs.pane2 === c.tabId);
+                                if (isVisibleInPane1 || isVisibleInPane2) {
+                                    renderPeerCursor(cid, c.pos, c.name, c.tabId);
+                                } else {
+                                    removePeerCursor(cid);
+                                }
 
                                 // Check remote cursor emoji flare
                                 if (c.flare && c.flare.timestamp && (now - c.flare.timestamp < 3500)) {
@@ -3659,10 +3992,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
                             }
 
-                            // Prune peers that were removed from Firestore (unless connected as local tab)
+                            // Prune peers that timed out (> 16s) (unless connected as local tab)
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
-                                if (!data.cursors[existingCid] && !peerCursorsData[existingCid].isLocalTab) {
+                                const p = peerCursorsData[existingCid];
+                                if (!p.isLocalTab && p.timestamp && (now - p.timestamp > 16000)) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -3673,10 +4007,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 updatePresenceUI();
                             }
                         } else {
-                            // If data.cursors is null/missing, clean up non-local peers
+                            // If data.cursors is null/missing, clean up peers that timed out
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
-                                if (!peerCursorsData[existingCid].isLocalTab) {
+                                const p = peerCursorsData[existingCid];
+                                if (!p.isLocalTab && p.timestamp && (now - p.timestamp > 16000)) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -3730,15 +4065,184 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         countdownInterval = setInterval(updateTimer, 1000);
     }
 
-    // --- Tabs Management ---
+    // --- Tab Ordering & Drag-and-Drop Reordering Engine ---
+    function ensureTabOrder() {
+        if (!Array.isArray(tabOrder)) tabOrder = [];
+        tabOrder = tabOrder.filter(tid => tabsData && tabsData.hasOwnProperty(tid));
+        if (tabsData) {
+            for (let tid in tabsData) {
+                if (!tabOrder.includes(tid)) {
+                    tabOrder.push(tid);
+                }
+            }
+        }
+        if (tabOrder.length === 0 && tabsData && Object.keys(tabsData).length > 0) {
+            tabOrder = Object.keys(tabsData);
+        }
+        if (currentToken) {
+            try { localStorage.setItem('quickpad_tab_order_' + currentToken, JSON.stringify(tabOrder)); } catch(e){}
+        }
+        return tabOrder;
+    }
+
+    function reorderTabs(sourceTid, targetTid, insertBefore) {
+        if (!sourceTid || !targetTid || sourceTid === targetTid) return;
+        ensureTabOrder();
+        const fromIndex = tabOrder.indexOf(sourceTid);
+        if (fromIndex === -1) return;
+
+        tabOrder.splice(fromIndex, 1);
+        let toIndex = tabOrder.indexOf(targetTid);
+        if (toIndex === -1) toIndex = tabOrder.length;
+        if (!insertBefore) toIndex++;
+
+        tabOrder.splice(toIndex, 0, sourceTid);
+        ensureTabOrder();
+        renderTabs();
+        updateMultiPaneSelectors();
+        tabsContentDirty = true;
+        isTabOrderDirty = true;
+        saveWorkspace();
+        broadcastLocalSync({
+            type: 'tabs_structure',
+            tabs: tabsData,
+            tab_order: tabOrder,
+            senderId: myDeviceId
+        });
+        showToast("Tab reordered", 'info');
+    }
+
+    function moveTabRelative(tid, direction) {
+        if (!tid || !tabsData[tid]) return;
+        ensureTabOrder();
+        const idx = tabOrder.indexOf(tid);
+        if (idx === -1) return;
+        const targetIdx = idx + direction;
+        if (targetIdx < 0 || targetIdx >= tabOrder.length) return;
+
+        tabOrder.splice(idx, 1);
+        tabOrder.splice(targetIdx, 0, tid);
+        ensureTabOrder();
+        renderTabs();
+        updateMultiPaneSelectors();
+        tabsContentDirty = true;
+        isTabOrderDirty = true;
+        saveWorkspace();
+        broadcastLocalSync({
+            type: 'tabs_structure',
+            tabs: tabsData,
+            tab_order: tabOrder,
+            senderId: myDeviceId
+        });
+        showToast(`Moved "${tabsData[tid].name}" ${direction < 0 ? 'left' : 'right'}`, 'info');
+    }
+
+    function openTabContextMenu(tid, x, y) {
+        if (!tabContextMenu || !tabsData[tid]) return;
+        contextMenuTabId = tid;
+
+        ensureTabOrder();
+        const idx = tabOrder.indexOf(tid);
+        if (tabCtxMoveLeft) tabCtxMoveLeft.style.display = idx > 0 ? 'flex' : 'none';
+        if (tabCtxMoveRight) tabCtxMoveRight.style.display = idx < tabOrder.length - 1 ? 'flex' : 'none';
+
+        tabContextMenu.classList.remove('hidden');
+        const menuWidth = 190;
+        const menuHeight = 220;
+        const posX = Math.min(x, window.innerWidth - menuWidth - 10);
+        const posY = Math.min(y, window.innerHeight - menuHeight - 10);
+        tabContextMenu.style.left = `${Math.max(10, posX)}px`;
+        tabContextMenu.style.top = `${Math.max(10, posY)}px`;
+    }
+
+    function closeTabContextMenu() {
+        if (tabContextMenu) tabContextMenu.classList.add('hidden');
+        contextMenuTabId = null;
+    }
+
+    document.addEventListener('click', (e) => {
+        if (tabContextMenu && !tabContextMenu.contains(e.target)) {
+            closeTabContextMenu();
+        }
+    });
+
+    if (tabCtxSplit) {
+        tabCtxSplit.addEventListener('click', () => {
+            const tid = contextMenuTabId;
+            closeTabContextMenu();
+            if (tid) {
+                setMultiNoteLayout(2, tid);
+                showToast(`Opened "${tabsData[tid].name}" in Side-by-Side View`, 'info');
+            }
+        });
+    }
+
+    if (tabCtxMoveLeft) {
+        tabCtxMoveLeft.addEventListener('click', () => {
+            const tid = contextMenuTabId;
+            closeTabContextMenu();
+            if (tid) moveTabRelative(tid, -1);
+        });
+    }
+
+    if (tabCtxMoveRight) {
+        tabCtxMoveRight.addEventListener('click', () => {
+            const tid = contextMenuTabId;
+            closeTabContextMenu();
+            if (tid) moveTabRelative(tid, 1);
+        });
+    }
+
+    if (tabCtxRename) {
+        tabCtxRename.addEventListener('click', () => {
+            const tid = contextMenuTabId;
+            closeTabContextMenu();
+            if (tid && tabsContainer) {
+                const tabEl = tabsContainer.querySelector(`.tab[data-tid="${tid}"]`);
+                if (tabEl) {
+                    const dblclickEvt = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
+                    tabEl.dispatchEvent(dblclickEvt);
+                }
+            }
+        });
+    }
+
+    if (tabCtxLock) {
+        tabCtxLock.addEventListener('click', () => {
+            const tid = contextMenuTabId;
+            closeTabContextMenu();
+            if (tid && typeof lockCurrentTab === 'function') {
+                if (activeTabId !== tid) switchTab(tid);
+                lockCurrentTab();
+            }
+        });
+    }
+
+    if (tabCtxDelete) {
+        tabCtxDelete.addEventListener('click', () => {
+            const tid = contextMenuTabId;
+            closeTabContextMenu();
+            if (tid && tabsContainer) {
+                const tabEl = tabsContainer.querySelector(`.tab[data-tid="${tid}"] .tab-close`);
+                if (tabEl) tabEl.click();
+            }
+        });
+    }
+
+    // --- Tabs Management with Drag & Drop ---
     function renderTabs() {
         if (!tabsContainer) return;
         tabsContainer.innerHTML = '';
-        for (let tid in tabsData) {
+        ensureTabOrder();
+
+        tabOrder.forEach((tid) => {
+            if (!tabsData[tid]) return;
             let t = document.createElement('div');
             t.className = 'tab' + (tid === activeTabId ? ' active' : ''); 
-            t.title = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
-            
+            t.title = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name + ' (Drag to reorder • Right-click for options)';
+            t.setAttribute('data-tid', tid);
+            t.draggable = true;
+
             let titleSpan = document.createElement('span');
             titleSpan.className = 'tab-title';
             titleSpan.innerText = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
@@ -3753,20 +4257,26 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 const confirmed = await showCustomConfirm("Delete Tab", `Are you sure you want to delete tab "${tabsData[tid].name}"?`);
                 if (confirmed) {
                     delete tabsData[tid];
+                    tabOrder = tabOrder.filter(id => id !== tid);
+                    ensureTabOrder();
                     tabsContentDirty = true;
+                dirtyTabIds.add(activeTabId);
                     if (tid === activeTabId) {
-                        activeTabId = Object.keys(tabsData)[0] || null;
+                        activeTabId = tabOrder[0] || null;
                         if (!activeTabId) {
                             activeTabId = generateToken();
                             tabsData[activeTabId] = { name: 'main.txt', content: '', is_encrypted: false };
+                            tabOrder = [activeTabId];
                         }
                         switchTab(activeTabId);
                     }
                     renderTabs();
+                    updateMultiPaneSelectors();
                     deleteTabFromDB(tid);
                     broadcastLocalSync({
                         type: 'tabs_structure',
                         tabs: tabsData,
+                        tab_order: tabOrder,
                         senderId: myDeviceId
                     });
                     saveWorkspace();
@@ -3774,15 +4284,130 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 }
             };
 
-            t.oncontextmenu = async (e) => {
+            // HTML5 Drag and Drop Handlers
+            t.addEventListener('dragstart', (e) => {
+                draggedTabId = tid;
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', tid);
+                setTimeout(() => t.classList.add('dragging'), 0);
+            });
+
+            t.addEventListener('dragend', () => {
+                t.classList.remove('dragging');
+                draggedTabId = null;
+                document.querySelectorAll('.tab.drop-before, .tab.drop-after').forEach(el => {
+                    el.classList.remove('drop-before', 'drop-after');
+                });
+            });
+
+            t.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (!draggedTabId || draggedTabId === tid) return;
+
+                const rect = t.getBoundingClientRect();
+                const midX = rect.left + rect.width / 2;
+                if (e.clientX < midX) {
+                    t.classList.add('drop-before');
+                    t.classList.remove('drop-after');
+                } else {
+                    t.classList.add('drop-after');
+                    t.classList.remove('drop-before');
+                }
+            });
+
+            t.addEventListener('dragleave', () => {
+                t.classList.remove('drop-before', 'drop-after');
+            });
+
+            t.addEventListener('drop', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                const confirmed = await showCustomConfirm("Delete Tab", `Delete tab "${tabsData[tid].name}"?`);
-                if (confirmed) {
-                    delBtn.click();
+                t.classList.remove('drop-before', 'drop-after');
+                if (!draggedTabId || draggedTabId === tid) return;
+
+                const rect = t.getBoundingClientRect();
+                const midX = rect.left + rect.width / 2;
+                const insertBefore = e.clientX < midX;
+
+                reorderTabs(draggedTabId, tid, insertBefore);
+            });
+
+            // Touch Drag Support for Tablets & Mobile
+            let touchTimer = null;
+            let touchStartX = 0;
+            let touchStartY = 0;
+            let isTouchDragging = false;
+
+            t.addEventListener('touchstart', (e) => {
+                if (e.touches.length !== 1) return;
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                touchTimer = setTimeout(() => {
+                    isTouchDragging = true;
+                    draggedTabId = tid;
+                    t.classList.add('touch-dragging');
+                    if (navigator.vibrate) navigator.vibrate(25);
+                }, 280);
+            }, { passive: true });
+
+            t.addEventListener('touchmove', (e) => {
+                if (!isTouchDragging) {
+                    const dx = Math.abs(e.touches[0].clientX - touchStartX);
+                    const dy = Math.abs(e.touches[0].clientY - touchStartY);
+                    if (dx > 10 || dy > 10) clearTimeout(touchTimer);
+                    return;
                 }
+                e.preventDefault();
+                const touchX = e.touches[0].clientX;
+                const touchY = e.touches[0].clientY;
+                const targetEl = document.elementFromPoint(touchX, touchY);
+                const targetTab = targetEl ? targetEl.closest('.tab') : null;
+
+                document.querySelectorAll('.tab.drop-before, .tab.drop-after').forEach(el => {
+                    if (el !== targetTab) el.classList.remove('drop-before', 'drop-after');
+                });
+
+                if (targetTab && targetTab !== t) {
+                    const rect = targetTab.getBoundingClientRect();
+                    const midX = rect.left + rect.width / 2;
+                    if (touchX < midX) {
+                        targetTab.classList.add('drop-before');
+                        targetTab.classList.remove('drop-after');
+                    } else {
+                        targetTab.classList.add('drop-after');
+                        targetTab.classList.remove('drop-before');
+                    }
+                }
+            }, { passive: false });
+
+            t.addEventListener('touchend', (e) => {
+                clearTimeout(touchTimer);
+                if (isTouchDragging) {
+                    isTouchDragging = false;
+                    t.classList.remove('touch-dragging');
+                    const lastTouch = e.changedTouches[0];
+                    const targetEl = document.elementFromPoint(lastTouch.clientX, lastTouch.clientY);
+                    const targetTab = targetEl ? targetEl.closest('.tab') : null;
+                    if (targetTab && targetTab !== t) {
+                        const targetTid = targetTab.getAttribute('data-tid');
+                        const rect = targetTab.getBoundingClientRect();
+                        const insertBefore = lastTouch.clientX < (rect.left + rect.width / 2);
+                        targetTab.classList.remove('drop-before', 'drop-after');
+                        reorderTabs(tid, targetTid, insertBefore);
+                    }
+                    draggedTabId = null;
+                }
+            });
+
+            // Tab Custom Context Menu
+            t.oncontextmenu = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openTabContextMenu(tid, e.clientX, e.clientY);
             };
 
+            // Double Click to Rename
             t.ondblclick = (e) => {
                 e.stopPropagation();
                 if (t.querySelector('.tab-rename-input')) return;
@@ -3809,9 +4434,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             tabsData[tid].content = '';
                         }
                         tabsContentDirty = true;
+                dirtyTabIds.add(activeTabId);
                         broadcastLocalSync({
                             type: 'tabs_structure',
                             tabs: tabsData,
+                            tab_order: tabOrder,
                             senderId: myDeviceId
                         });
                         if (tid === activeTabId && wasDraw !== nowDraw) {
@@ -3819,6 +4446,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         } else {
                             saveWorkspace();
                             renderTabs();
+                            updateMultiPaneSelectors();
                         }
                         showToast(`Renamed tab to "${val}"`, 'success');
                         return;
@@ -3842,7 +4470,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             t.onclick = () => switchTab(tid);
             t.appendChild(delBtn);
             tabsContainer.appendChild(t);
-        }
+        });
+
         const activeTabEl = tabsContainer.querySelector('.tab.active');
         if (activeTabEl && tabsBar) {
             activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
@@ -3856,23 +4485,283 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (confirmed) {
             const tid = activeTabId;
             delete tabsData[tid];
+            dirtyTabIds.add(tid);
+            isTabOrderDirty = true;
+            tabOrder = tabOrder.filter(id => id !== tid);
+            ensureTabOrder();
             tabsContentDirty = true;
-            activeTabId = Object.keys(tabsData)[0] || null;
+            activeTabId = tabOrder[0] || null;
             if (!activeTabId) {
                 activeTabId = generateToken();
                 tabsData[activeTabId] = { name: 'main.txt', content: '', is_encrypted: false };
+                tabOrder = [activeTabId];
             }
             switchTab(activeTabId);
             renderTabs();
+            updateMultiPaneSelectors();
             deleteTabFromDB(tid);
             broadcastLocalSync({
                 type: 'tabs_structure',
                 tabs: tabsData,
+                tab_order: tabOrder,
                 senderId: myDeviceId
             });
             saveWorkspace();
             showToast("Tab deleted", 'info');
         }
+    }
+
+    if (deleteTabMenuBtn) deleteTabMenuBtn.addEventListener('click', deleteActiveTab);
+
+    // --- Multi-Note Side-by-Side View Engine (2 Notes View) ---
+    function setMultiNoteLayout(count, tabIdForPane2 = null) {
+        multiNoteMode = (count === 2) ? 2 : 1;
+        ensureTabOrder();
+
+        // If Markdown preview mode or split mode is active, disable them gracefully
+        if (multiNoteMode > 1) {
+            if (isSplitMode) {
+                isSplitMode = false;
+                document.body.classList.remove('split-mode');
+                if (splitToggleBtn) splitToggleBtn.innerHTML = '<span>🌗 Split View</span><kbd>Alt+S</kbd>';
+            }
+            if (isMarkdown) {
+                isMarkdown = false;
+                updateViewVisibility();
+                if (mdToggleBtn) mdToggleBtn.innerHTML = '<span>👁️ Markdown Preview</span><kbd>Alt+M</kbd>';
+            }
+        }
+
+        document.body.classList.remove('multi-note-active', 'multi-note-2');
+
+        if (multiNoteMode === 1) {
+            updateViewVisibility();
+            if (editor) editor.focus();
+            if (multiNote2Btn) multiNote2Btn.classList.remove('active');
+            if (splitNotesBtn) splitNotesBtn.classList.remove('active');
+            try { localStorage.setItem('quickpad_multi_note_' + currentToken, '1'); } catch(e){}
+            updateAllVisiblePeerCursors();
+            syncMyCursor();
+            return;
+        }
+
+        document.body.classList.add('multi-note-active', 'multi-note-2');
+        if (splitNotesBtn) splitNotesBtn.classList.add('active');
+        if (multiNote2Btn) multiNote2Btn.classList.add('active');
+
+        // Ensure there are at least 2 tabs for the side-by-side view
+        const availableTabs = tabOrder.filter(tid => tabsData[tid]);
+        if (availableTabs.length < 2) {
+            const newTid = generateToken();
+            tabsData[newTid] = { name: 'notes-2.txt', content: '', is_encrypted: false };
+            tabOrder.push(newTid);
+            dirtyTabIds.add(newTid);
+            isTabOrderDirty = true;
+            renderTabs();
+            tabsContentDirty = true;
+            scheduleWorkspaceSave();
+        }
+
+        // Setup Pane 1 Header
+        if (multiPane1Title) {
+            multiPane1Title.innerText = `Pane 1: ${tabsData[activeTabId] ? tabsData[activeTabId].name : 'Note'}`;
+        }
+
+        // Determine Tab for Pane 2
+        if (tabIdForPane2 && tabsData[tabIdForPane2]) {
+            multiPaneTabs.pane2 = tabIdForPane2;
+        } else if (!multiPaneTabs.pane2 || !tabsData[multiPaneTabs.pane2] || multiPaneTabs.pane2 === activeTabId) {
+            const candidate = tabOrder.find(id => id !== activeTabId && tabsData[id]);
+            multiPaneTabs.pane2 = candidate || activeTabId;
+        }
+
+        updateMultiPaneSelectors();
+        loadMultiPaneContent(2);
+
+        try { localStorage.setItem('quickpad_multi_note_' + currentToken, '2'); } catch(e){}
+        updateAllVisiblePeerCursors();
+        syncMyCursor();
+    }
+
+    function updateMultiPaneSelectors() {
+        ensureTabOrder();
+        if (multiPane2Select) {
+            multiPane2Select.innerHTML = '';
+            tabOrder.forEach(tid => {
+                if (!tabsData[tid]) return;
+                const opt = document.createElement('option');
+                opt.value = tid;
+                opt.innerText = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
+                if (tid === multiPaneTabs.pane2) opt.selected = true;
+                multiPane2Select.appendChild(opt);
+            });
+        }
+        if (multiPane1Title) {
+            multiPane1Title.innerText = `Pane 1: ${tabsData[activeTabId] ? tabsData[activeTabId].name : 'Note'}`;
+        }
+    }
+
+    function loadMultiPaneContent(paneNum = 2) {
+        const tid = multiPaneTabs.pane2;
+        if (!tid || !tabsData[tid] || !multiPane2Editor) return;
+
+        const tab = tabsData[tid];
+        if (tab.is_secret && !tab.secret_pass) {
+            multiPane2Editor.value = "🔒 This tab is protected with a password.\n\nUnlock it in the primary tab to view/edit content here.";
+            multiPane2Editor.readOnly = true;
+        } else {
+            multiPane2Editor.value = tab.content || '';
+            multiPane2Editor.readOnly = isReadOnly;
+        }
+
+        if (multiPanePreviews.pane2 && multiPane2Preview) {
+            updateMultiPanePreview(2);
+        }
+    }
+
+    function updateMultiPanePreview(paneNum = 2) {
+        if (!multiPane2Preview || !multiPane2Editor) return;
+
+        const raw = multiPane2Editor.value || '';
+        if (typeof marked !== 'undefined') {
+            try {
+                multiPane2Preview.innerHTML = marked.parse(raw);
+            } catch(e) {
+                multiPane2Preview.innerText = raw;
+            }
+        } else {
+            multiPane2Preview.innerText = raw;
+        }
+    }
+
+    function toggleMultiPanePreview(paneNum = 2) {
+        multiPanePreviews.pane2 = !multiPanePreviews.pane2;
+        const isPrev = multiPanePreviews.pane2;
+
+        if (multiPane2MdBtn) {
+            multiPane2MdBtn.innerHTML = isPrev ? '<span>✏️ Edit</span>' : '<span>👁️ Preview</span>';
+            multiPane2MdBtn.classList.toggle('active', isPrev);
+        }
+        if (multiPane2Editor && multiPane2Preview) {
+            if (isPrev) {
+                multiPane2Editor.style.display = 'none';
+                multiPane2Preview.classList.remove('hidden');
+                updateMultiPanePreview(2);
+            } else {
+                multiPane2Editor.style.display = 'block';
+                multiPane2Preview.classList.add('hidden');
+                multiPane2Editor.focus();
+            }
+        }
+    }
+
+    function selectTabInMultiPane(paneNum = 2, tid) {
+        if (!tid || !tabsData[tid]) return;
+        multiPaneTabs.pane2 = tid;
+        updateMultiPaneSelectors();
+        loadMultiPaneContent(2);
+        updateAllVisiblePeerCursors();
+        syncMyCursor();
+    }
+
+    function onMultiPaneInput(paneNum = 2) {
+        const tid = multiPaneTabs.pane2;
+        if (!tid || !tabsData[tid] || !multiPane2Editor) return;
+
+        tabsData[tid].content = multiPane2Editor.value;
+        tabsContentDirty = true;
+        dirtyTabIds.add(tid);
+
+        if (activeTabId === tid && editor && editor.value !== multiPane2Editor.value) {
+            editor.value = multiPane2Editor.value;
+            updatePreview();
+        }
+
+        broadcastLocalSync({
+            type: 'tab_content',
+            tid: tid,
+            content: multiPane2Editor.value,
+            senderId: myDeviceId
+        });
+
+        isTyping = true;
+        typingTabId = tid;
+        setSaveStatus('saving');
+        clearTimeout(typingResetTimeout);
+        typingResetTimeout = setTimeout(() => { isTyping = false; typingTabId = null; }, 500);
+
+        scheduleWorkspaceSave();
+        syncMyCursor();
+
+        if (multiPanePreviews.pane2) {
+            updateMultiPanePreview(2);
+        }
+    }
+
+    // Connect Multi-Note UI Buttons
+    if (splitNotesBtn) {
+        splitNotesBtn.addEventListener('click', () => {
+            const nextMode = multiNoteMode === 1 ? 2 : 1;
+            setMultiNoteLayout(nextMode);
+            showToast(nextMode === 1 ? "Single Note View" : "2 Notes Side-by-Side", 'info');
+        });
+    }
+
+    if (multiNote2Btn) {
+        multiNote2Btn.addEventListener('click', () => {
+            const nextMode = multiNoteMode === 2 ? 1 : 2;
+            setMultiNoteLayout(nextMode);
+            showToast(nextMode === 1 ? "Single Note View" : "2 Notes Side-by-Side", 'info');
+        });
+    }
+
+    if (multiPane1SingleBtn) {
+        multiPane1SingleBtn.addEventListener('click', () => setMultiNoteLayout(1));
+    }
+
+    if (multiPane2CloseBtn) {
+        multiPane2CloseBtn.addEventListener('click', () => setMultiNoteLayout(1));
+    }
+
+    if (multiPane2Select) {
+        multiPane2Select.addEventListener('change', (e) => selectTabInMultiPane(2, e.target.value));
+    }
+
+    if (multiPane2MdBtn) {
+        multiPane2MdBtn.addEventListener('click', () => toggleMultiPanePreview(2));
+    }
+
+    if (multiPane2Editor) {
+        multiPane2Editor.addEventListener('input', () => onMultiPaneInput(2));
+        multiPane2Editor.addEventListener('keyup', () => {
+            if (!isBurnMode) syncMyCursor();
+        });
+        multiPane2Editor.addEventListener('click', () => {
+            if (!isBurnMode) syncMyCursor();
+        });
+        multiPane2Editor.addEventListener('scroll', () => {
+            updateAllVisiblePeerCursors();
+        });
+    }
+
+    // Allow dragging a tab from the tabs strip directly onto Pane 2
+    if (multiPane2) {
+        multiPane2.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            multiPane2.classList.add('drag-target-hover');
+        });
+        multiPane2.addEventListener('dragleave', () => multiPane2.classList.remove('drag-target-hover'));
+        multiPane2.addEventListener('drop', (e) => {
+            e.preventDefault();
+            multiPane2.classList.remove('drag-target-hover');
+            const tid = e.dataTransfer.getData('text/plain') || draggedTabId;
+            if (tid && tabsData[tid]) {
+                if (multiNoteMode < 2) setMultiNoteLayout(2, tid);
+                else selectTabInMultiPane(2, tid);
+                showToast(`Opened "${tabsData[tid].name}" in Pane 2`, 'info');
+            }
+        });
     }
 
     if (deleteTabMenuBtn) deleteTabMenuBtn.addEventListener('click', deleteActiveTab);
@@ -4023,29 +4912,26 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
         if (isDrawTab) {
             if (canvasContainer) canvasContainer.classList.remove('hidden');
-            if (editor) editor.style.display = 'none';
-            if (preview) preview.style.display = 'none';
-            if (editorMirror) editorMirror.style.display = 'none';
             loadWhiteboardFromTab(tabsData[tid].content);
         } else {
             if (canvasContainer) canvasContainer.classList.add('hidden');
             if (editor) {
-                editor.style.display = '';
                 editor.value = tabsData[tid] ? tabsData[tid].content : '';
                 editor.readOnly = isReadOnly;
             }
-            if (preview) preview.style.display = (isMarkdown || isSplitMode) ? 'block' : 'none';
-            if (editorMirror) editorMirror.style.display = '';
             if (tabsData[tid] && tabsData[tid].content) {
                 triggerCipherGlitchAnimation(tabsData[tid].content);
             }
         }
 
+        updateViewVisibility();
         renderTabs();
-        updatePreview();
+        updateMultiPaneSelectors();
         isTyping = false;
         updateHUD();
-        if (editor && !isDrawTab) editor.focus();
+        updateAllVisiblePeerCursors();
+        syncMyCursor();
+        if (editor && !isDrawTab && !isMarkdown) editor.focus();
         if (isFocusMode) scheduleFocusDimmingUpdate();
         if (privacyInspectorModal && !privacyInspectorModal.classList.contains('hidden')) updatePrivacyInspector();
         if (!skipSave) saveWorkspace();
@@ -4057,11 +4943,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (name && name.trim()) {
                 let tid = generateToken();
                 tabsData[tid] = { name: name.trim(), content: '', is_encrypted: false };
+                ensureTabOrder();
+                if (!tabOrder.includes(tid)) tabOrder.push(tid);
                 tabsContentDirty = true;
+                dirtyTabIds.add(tid);
+                isTabOrderDirty = true;
                 switchTab(tid);
+                updateMultiPaneSelectors();
                 broadcastLocalSync({
                     type: 'tabs_structure',
                     tabs: tabsData,
+                    tab_order: tabOrder,
                     senderId: myDeviceId
                 });
                 showToast("New tab created", 'success');
@@ -4112,6 +5004,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
     // --- Workspace Save & Encryption ---
     async function saveWorkspace() {
+        if (debounceTimeout) { clearTimeout(debounceTimeout); debounceTimeout = null; }
+        if (saveMaxWaitTimer) { clearTimeout(saveMaxWaitTimer); saveMaxWaitTimer = null; }
         if (isReadOnly || isBurnMode) return;
         if (!currentToken || !editor) return;
         if (!activeTabId || !tabsData[activeTabId]) {
@@ -4128,17 +5022,28 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     if (tabsData[activeTabId].content !== canvasData) {
                         tabsData[activeTabId].content = canvasData;
                         tabsContentDirty = true;
+                        dirtyTabIds.add(activeTabId);
                     }
                 }
             } else {
                 if (tabsData[activeTabId].content !== editor.value) {
                     tabsData[activeTabId].content = editor.value;
                     tabsContentDirty = true;
+                    dirtyTabIds.add(activeTabId);
+                }
+            }
+
+            // Sync secondary multi-pane editor content if 2-note view is active
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 && multiPane2Editor && tabsData[multiPaneTabs.pane2]) {
+                if (tabsData[multiPaneTabs.pane2].content !== multiPane2Editor.value) {
+                    tabsData[multiPaneTabs.pane2].content = multiPane2Editor.value;
+                    tabsContentDirty = true;
+                    dirtyTabIds.add(multiPaneTabs.pane2);
                 }
             }
             
             let currentTabsJSON = JSON.stringify(tabsData);
-            const needsTabsSave = tabsContentDirty || (currentTabsJSON !== lastSavedTabsJSON);
+            const needsTabsSave = tabsContentDirty || (currentTabsJSON !== lastSavedTabsJSON) || (dirtyTabIds.size > 0);
 
             // If nothing changed and no timer or polls, skip network write
             if (!needsTabsSave && !timerMinutes && Object.keys(workspacePolls).length === 0) {
@@ -4146,30 +5051,84 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 return;
             }
 
+            const isPane2Active = (multiNoteMode === 2 && document.activeElement === multiPane2Editor);
+            const activeEditorForCursor = isPane2Active ? multiPane2Editor : editor;
+            const activeTabForCursor = (isPane2Active && multiPaneTabs.pane2) ? multiPaneTabs.pane2 : activeTabId;
+            const currentPos = activeEditorForCursor ? activeEditorForCursor.selectionStart || 0 : 0;
+
+            const myCursorData = {
+                pos: currentPos,
+                name: myUsername,
+                avatar: myAvatarUrl,
+                tabId: activeTabForCursor,
+                timestamp: Date.now(),
+                pubKey: myPublicKeyJwk
+            };
+
+            const isInitialSave = !lastSavedTabsJSON;
             const payload = {
                 is_encrypted: !!vaultPassword,
                 updated_at: Date.now(),
                 last_writer: myDeviceId
             };
+            if (isInitialSave) {
+                payload.cursors = {
+                    [myDeviceId]: myCursorData
+                };
+            } else {
+                payload[`cursors.${myDeviceId}`] = myCursorData;
+            }
+
+            broadcastLocalSync({
+                type: 'cursor_presence',
+                senderId: myDeviceId,
+                cursor: myCursorData
+            });
+            lastFirestoreCursorSync = Date.now();
 
             if (Object.keys(workspacePolls).length > 0) {
                 payload.polls = workspacePolls;
             }
+
+            function serializeTabContent(tid) {
+                if (!tabsData[tid]) return null;
+                let contentToSave = tabsData[tid].content || '';
+                if (tabsData[tid].is_secret && !tabsData[tid].secret_pass && tabsData[tid].encrypted_blob) {
+                    contentToSave = tabsData[tid].encrypted_blob;
+                } else if (tabsData[tid].is_secret && tabsData[tid].secret_pass && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                    contentToSave = CryptoJS.AES.encrypt(contentToSave, tabsData[tid].secret_pass).toString();
+                }
+                if (vaultPassword && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                    contentToSave = CryptoJS.AES.encrypt(contentToSave, vaultPassword).toString();
+                }
+                return { name: tabsData[tid].name, content: contentToSave, is_secret: !!tabsData[tid].is_secret };
+            }
             
-            if (needsTabsSave || isTyping) {
-                payload.tabs = {};
-                for (let tid in tabsData) {
-                    let contentToSave = tabsData[tid].content;
-                    if (tabsData[tid].is_secret && !tabsData[tid].secret_pass && tabsData[tid].encrypted_blob) {
-                        contentToSave = tabsData[tid].encrypted_blob;
-                    } else if (tabsData[tid].is_secret && tabsData[tid].secret_pass && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
-                        contentToSave = CryptoJS.AES.encrypt(contentToSave, tabsData[tid].secret_pass).toString();
+            if (needsTabsSave || isTyping || isInitialSave) {
+                if (isTabOrderDirty || isInitialSave) {
+                    payload.tab_order = tabOrder;
+                    isTabOrderDirty = false;
+                }
+                if (isInitialSave) {
+                    payload.tabs = {};
+                    for (let tid in tabsData) {
+                        payload.tabs[tid] = serializeTabContent(tid);
+                        lastSyncedServerTabs[tid] = { content: tabsData[tid].content };
                     }
-                    if (vaultPassword && contentToSave && !contentToSave.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
-                        contentToSave = CryptoJS.AES.encrypt(contentToSave, vaultPassword).toString();
+                } else {
+                    if (dirtyTabIds.size === 0 && activeTabId) {
+                        dirtyTabIds.add(activeTabId);
                     }
-                    payload.tabs[tid] = { name: tabsData[tid].name, content: contentToSave, is_secret: !!tabsData[tid].is_secret };
-                    lastSyncedServerTabs[tid] = { content: tabsData[tid].content };
+                    for (let tid of dirtyTabIds) {
+                        if (!tabsData[tid]) {
+                            if (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldValue) {
+                                payload[`tabs.${tid}`] = firebase.firestore.FieldValue.delete();
+                            }
+                        } else {
+                            payload[`tabs.${tid}`] = serializeTabContent(tid);
+                            lastSyncedServerTabs[tid] = { content: tabsData[tid].content };
+                        }
+                    }
                 }
             }
             
@@ -4181,7 +5140,21 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (db) {
                 showLoader();
                 try {
-                    await db.collection("workspaces").doc(currentToken).set(payload, { merge: true });
+                    if (isInitialSave) {
+                        await db.collection("workspaces").doc(currentToken).set(payload, { merge: true });
+                    } else {
+                        try {
+                            await db.collection("workspaces").doc(currentToken).update(payload);
+                        } catch(upErr) {
+                            // Document might not exist yet; fall back to set
+                            const fallbackPayload = { ...payload, tabs: {} };
+                            for (let tid in tabsData) {
+                                fallbackPayload.tabs[tid] = serializeTabContent(tid);
+                            }
+                            await db.collection("workspaces").doc(currentToken).set(fallbackPayload, { merge: true });
+                        }
+                    }
+                    dirtyTabIds.clear();
                     lastSavedTabsJSON = currentTabsJSON;
                     tabsContentDirty = false;
                     isCloudQuotaExceeded = false;
@@ -4251,73 +5224,157 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         return PEER_COLORS[index];
     }
 
-    // --- Caret Position & Remote Cursors ---
-    function getCaretCoordinates(pos) {
-        if (!editor || !editorMirror) return { top: 0, left: 0 };
+    // --- Caret Position & Remote Cursors Engine ---
+    function getCaretCoordinates(targetTextareaOrPos, maybePos) {
+        let targetTextarea = editor;
+        let pos = 0;
+        if (typeof targetTextareaOrPos === 'number') {
+            pos = targetTextareaOrPos;
+            targetTextarea = editor;
+        } else {
+            targetTextarea = targetTextareaOrPos || editor;
+            pos = (typeof maybePos === 'number') ? maybePos : 0;
+        }
+
+        if (!targetTextarea || !editorMirror || !cursorsContainer) {
+            return { top: 0, left: 0, height: 24, visible: true };
+        }
         
-        // Exact styling replication from editor to mirror
-        const style = window.getComputedStyle(editor);
+        if (typeof pos !== 'number' || isNaN(pos)) pos = 0;
+        const val = targetTextarea.value || '';
+        pos = Math.max(0, Math.min(pos, val.length));
+
+        const style = window.getComputedStyle(targetTextarea);
+        const containerRect = cursorsContainer.getBoundingClientRect();
+        const textareaRect = targetTextarea.getBoundingClientRect();
+
+        // Exact typography & text rendering replication from targetTextarea to mirror
         editorMirror.style.fontFamily = style.fontFamily;
         editorMirror.style.fontSize = style.fontSize;
         editorMirror.style.fontWeight = style.fontWeight;
+        editorMirror.style.fontStyle = style.fontStyle;
         editorMirror.style.lineHeight = style.lineHeight;
         editorMirror.style.letterSpacing = style.letterSpacing;
         editorMirror.style.wordSpacing = style.wordSpacing;
         editorMirror.style.tabSize = style.tabSize;
-        editorMirror.style.paddingTop = style.paddingTop;
-        editorMirror.style.paddingRight = style.paddingRight;
-        editorMirror.style.paddingBottom = style.paddingBottom;
-        editorMirror.style.paddingLeft = style.paddingLeft;
-        editorMirror.style.borderTopWidth = style.borderTopWidth;
-        editorMirror.style.borderRightWidth = style.borderRightWidth;
-        editorMirror.style.borderBottomWidth = style.borderBottomWidth;
-        editorMirror.style.borderLeftWidth = style.borderLeftWidth;
-        editorMirror.style.width = `${editor.clientWidth}px`;
-        editorMirror.style.boxSizing = 'border-box';
         editorMirror.style.whiteSpace = 'pre-wrap';
         editorMirror.style.wordBreak = 'break-word';
         editorMirror.style.wordWrap = 'break-word';
         editorMirror.style.overflowWrap = 'break-word';
 
+        // Accurately match the inner content wrapping width of the textarea (excluding vertical scrollbars)
+        const padLeft = parseFloat(style.paddingLeft) || 0;
+        const padRight = parseFloat(style.paddingRight) || 0;
+        const padTop = parseFloat(style.paddingTop) || 0;
+        const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+        const borderTop = parseFloat(style.borderTopWidth) || 0;
+        const innerWrapWidth = Math.max(0, targetTextarea.clientWidth - padLeft - padRight);
+
+        editorMirror.style.boxSizing = 'content-box';
+        editorMirror.style.width = `${innerWrapWidth}px`;
+        editorMirror.style.padding = '0';
+        editorMirror.style.border = 'none';
+        editorMirror.style.margin = '0';
+
         editorMirror.innerHTML = '';
 
-        const textBefore = editor.value.substring(0, pos);
+        const textBefore = val.substring(0, pos);
         const textNode = document.createTextNode(textBefore);
         editorMirror.appendChild(textNode);
 
         const marker = document.createElement('span');
-        const charAtPos = editor.value.charAt(pos);
-        marker.textContent = charAtPos && charAtPos !== '\n' ? charAtPos : '\u200B';
+        marker.style.display = 'inline-block';
+        marker.style.width = '0px';
+        marker.style.height = style.lineHeight;
+        marker.textContent = '\u200B';
         editorMirror.appendChild(marker);
 
-        // Compute top/left directly relative to offset parent (#workspace-main)
-        const top = marker.offsetTop - editor.scrollTop;
-        const left = marker.offsetLeft - editor.scrollLeft;
+        // Ensure trailing newline properly advances marker to next line in pre-wrap
+        if (pos > 0 && val.charAt(pos - 1) === '\n') {
+            marker.innerHTML = '&nbsp;';
+        }
 
-        return { top, left };
+        const textAfter = val.substring(pos);
+        if (textAfter) {
+            editorMirror.appendChild(document.createTextNode(textAfter));
+        }
+
+        // Exact offset of textarea relative to cursorsContainer
+        const textareaOffsetTop = textareaRect.top - containerRect.top;
+        const textareaOffsetLeft = textareaRect.left - containerRect.left;
+
+        // Position of caret inside the textarea's content area
+        const caretX = padLeft + borderLeft + marker.offsetLeft - targetTextarea.scrollLeft;
+        const caretY = padTop + borderTop + marker.offsetTop - targetTextarea.scrollTop;
+
+        const finalLeft = textareaOffsetLeft + caretX;
+        const finalTop = textareaOffsetTop + caretY;
+        const lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.7) || 24;
+
+        return {
+            top: Math.round(finalTop),
+            left: Math.round(finalLeft),
+            height: Math.round(lineHeight),
+            visible: (caretY >= 0 && caretY <= targetTextarea.clientHeight)
+        };
     }
 
-    function renderPeerCursor(peerId, pos, peerName = "Anon") {
-        if (!cursorsContainer || !editor) return;
-        if (typeof pos !== 'number' || isNaN(pos)) pos = 0;
-        pos = Math.max(0, Math.min(pos, editor.value.length));
+    function renderPeerCursor(peerId, pos, peerName = "Anon", tabId = null) {
+        if (!cursorsContainer) return;
+
+        // Determine which textarea displays this tab
+        let targetTextarea = null;
+        if (tabId) {
+            if (tabId === activeTabId && editor && editor.offsetParent !== null) {
+                targetTextarea = editor;
+            } else if (multiNoteMode === 2 && multiPaneTabs.pane2 === tabId && multiPane2Editor && multiPane2Editor.offsetParent !== null) {
+                targetTextarea = multiPane2Editor;
+            }
+        } else {
+            targetTextarea = (editor && editor.offsetParent !== null) ? editor : null;
+        }
 
         let cursor = document.getElementById('cursor-' + peerId);
+
+        // If target tab is not currently visible on screen in either pane, hide cursor
+        if (!targetTextarea) {
+            if (cursor) cursor.style.display = 'none';
+            return;
+        }
+
         if (!cursor) {
             cursor = document.createElement('div');
             cursor.id = 'cursor-' + peerId;
             cursor.className = 'peer-cursor';
             cursorsContainer.appendChild(cursor);
         }
+        cursor.style.display = 'block';
         cursor.setAttribute('data-name', peerName);
         const colorObj = getPeerColor(peerId);
         cursor.style.setProperty('--cursor-color', colorObj.color);
         cursor.style.setProperty('--cursor-text-color', colorObj.text);
 
-        const coords = getCaretCoordinates(pos);
+        const coords = getCaretCoordinates(targetTextarea, pos);
         cursor.style.top = coords.top + 'px';
         cursor.style.left = coords.left + 'px';
-        cursor.style.height = `${currentFontSize * 1.4}px`;
+        cursor.style.height = `${coords.height}px`;
+        cursor.style.opacity = coords.visible ? '1' : '0';
+    }
+
+    function updateAllVisiblePeerCursors() {
+        if (!cursorsContainer) return;
+        for (let cid in peerCursorsData) {
+            if (cid === myDeviceId) continue;
+            const c = peerCursorsData[cid];
+            if (!c) continue;
+            const isVisibleInPane1 = (c.tabId === activeTabId);
+            const isVisibleInPane2 = (multiNoteMode === 2 && multiPaneTabs.pane2 === c.tabId);
+            if (isVisibleInPane1 || isVisibleInPane2) {
+                renderPeerCursor(cid, c.pos, c.name, c.tabId);
+            } else {
+                removePeerCursor(cid);
+            }
+        }
     }
 
     function removePeerCursor(peerId) {
@@ -4329,11 +5386,16 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     function syncMyCursor(forceCloud = false) {
         if (!currentToken || isBurnMode || isReadOnly) return;
         
+        const isPane2Active = (multiNoteMode === 2 && document.activeElement === multiPane2Editor);
+        const activeEditorForCursor = isPane2Active ? multiPane2Editor : editor;
+        const activeTabForCursor = (isPane2Active && multiPaneTabs.pane2) ? multiPaneTabs.pane2 : activeTabId;
+        const currentPos = activeEditorForCursor ? activeEditorForCursor.selectionStart || 0 : 0;
+
         const cursorData = {
-            pos: editor ? editor.selectionStart || 0 : 0,
+            pos: currentPos,
             name: myUsername,
             avatar: myAvatarUrl,
-            tabId: activeTabId,
+            tabId: activeTabForCursor,
             timestamp: Date.now(),
             pubKey: myPublicKeyJwk
         };
@@ -4366,10 +5428,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         const now = Date.now();
         const hasRemotePeers = Object.keys(peerCursorsData).length > 0;
         
-        // Throttling:
-        // - Remote peers active: throttle cursor updates to once every 3 seconds
+        // Responsive throttling:
+        // - Remote peers active: throttle cursor updates to once every 350ms for live tracking
         // - Alone in room: heartbeat update every 7 seconds to keep presence alive in document
-        const minInterval = hasRemotePeers ? 3000 : 7000;
+        const minInterval = hasRemotePeers ? 350 : 7000;
         const elapsed = now - lastFirestoreCursorSync;
 
         if (!forceCloud && elapsed < minInterval) {
@@ -4440,7 +5502,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (isBurnMode) return;
             if (tabsData[activeTabId] && tabsData[activeTabId].is_secret && !tabsData[activeTabId].secret_pass) return;
             if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                multiPane2Editor.value = editor.value;
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
             tabsContentDirty = true;
+            dirtyTabIds.add(activeTabId);
             broadcastLocalSync({
                 type: 'tab_content',
                 tid: activeTabId,
@@ -4448,9 +5515,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 senderId: myDeviceId
             });
             isTyping = true;
+            typingTabId = activeTabId;
             setSaveStatus('saving');
             clearTimeout(typingResetTimeout);
-            typingResetTimeout = setTimeout(() => { isTyping = false; }, 600);
+            typingResetTimeout = setTimeout(() => { isTyping = false; typingTabId = null; }, 500);
             updateHUD();
             recordKeystrokeForWpm();
             updateTaskProgress();
@@ -4458,8 +5526,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             syncMyCursor();
             if (isFocusMode) scheduleFocusDimmingUpdate();
             if (privacyInspectorModal && !privacyInspectorModal.classList.contains('hidden')) updatePrivacyInspector();
-            clearTimeout(debounceTimeout);
-            debounceTimeout = setTimeout(saveWorkspace, 1200);
+            scheduleWorkspaceSave();
         });
 
         ['mousedown', 'beforeinput', 'paste', 'drop'].forEach(evt => {
@@ -4494,7 +5561,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     }
                 }
                 if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                multiPane2Editor.value = editor.value;
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
                 tabsContentDirty = true;
+                dirtyTabIds.add(activeTabId);
                 broadcastLocalSync({
                     type: 'tab_content',
                     tid: activeTabId,
@@ -4505,8 +5577,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 if (isMarkdown || isSplitMode) updatePreview();
                 syncMyCursor();
                 if (isFocusMode) scheduleFocusDimmingUpdate();
-                clearTimeout(debounceTimeout);
-                debounceTimeout = setTimeout(saveWorkspace, 1200);
+                scheduleWorkspaceSave();
             }
         });
 
@@ -4549,27 +5620,21 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
 
         editor.addEventListener('scroll', () => {
-            for (let cid in peerCursorsData) {
-                if (peerCursorsData[cid] && peerCursorsData[cid].tabId === activeTabId) {
-                    renderPeerCursor(cid, peerCursorsData[cid].pos, peerCursorsData[cid].name);
-                }
-            }
+            updateAllVisiblePeerCursors();
             if (isFocusMode) scheduleFocusDimmingUpdate();
         });
     }
 
     document.addEventListener('selectionchange', () => {
-        if (document.activeElement === editor && !isBurnMode) {
+        if ((document.activeElement === editor || document.activeElement === multiPane2Editor) && !isBurnMode) {
             syncMyCursor();
             if (isFocusMode) scheduleFocusDimmingUpdate();
         }
     });
 
     window.addEventListener('resize', () => {
-        for (let cid in peerCursorsData) {
-            if (peerCursorsData[cid] && peerCursorsData[cid].tabId === activeTabId) {
-                renderPeerCursor(cid, peerCursorsData[cid].pos, peerCursorsData[cid].name);
-            }
+        if (typeof updateAllVisiblePeerCursors === 'function') {
+            updateAllVisiblePeerCursors();
         }
         if (isFocusMode) scheduleFocusDimmingUpdate();
     });
@@ -4579,18 +5644,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         mdToggleBtn.addEventListener('click', () => {
             if (isSplitMode) return;
             isMarkdown = !isMarkdown;
+            updateViewVisibility();
             if (isMarkdown) {
-                updatePreview();
-                if (editor) editor.classList.add('hidden');
-                if (preview) preview.classList.remove('hidden');
                 mdToggleBtn.innerHTML = '<span>✏️ Edit View</span><kbd>Alt+M</kbd>';
             } else {
-                if (editor) {
-                    editor.classList.remove('hidden');
-                    editor.focus();
-                }
-                if (preview) preview.classList.add('hidden');
                 mdToggleBtn.innerHTML = '<span>👁️ Markdown Preview</span><kbd>Alt+M</kbd>';
+                if (editor) editor.focus();
             }
         });
     }
@@ -4599,29 +5658,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         splitToggleBtn.addEventListener('click', () => {
             isSplitMode = !isSplitMode;
             if (isSplitMode) {
-                document.body.classList.add('split-mode');
                 splitToggleBtn.innerHTML = '<span>💻 Single View</span><kbd>Alt+S</kbd>';
                 if (mdToggleBtn) {
                     mdToggleBtn.style.opacity = '0.4';
                     mdToggleBtn.style.pointerEvents = 'none';
                 }
-                if (editor) editor.classList.remove('hidden');
-                if (preview) preview.classList.remove('hidden');
-                updatePreview();
             } else {
-                document.body.classList.remove('split-mode');
                 splitToggleBtn.innerHTML = '<span>🌗 Split View</span><kbd>Alt+S</kbd>';
                 if (mdToggleBtn) {
                     mdToggleBtn.style.opacity = '1';
                     mdToggleBtn.style.pointerEvents = 'auto';
                 }
-                if (!isMarkdown) {
-                    if (preview) preview.classList.add('hidden');
-                } else {
-                    if (editor) editor.classList.add('hidden');
-                    if (preview) preview.classList.remove('hidden');
-                }
             }
+            updateViewVisibility();
         });
     }
 
@@ -4644,42 +5693,110 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     if (copyViewLink) copyViewLink.addEventListener('click', () => shareViewLink && copyToClipboard(shareViewLink.value, "Read-Only link copied!"));
 
     // --- Self-Destruct Burn Notes ---
+    const burnLinkModal = document.getElementById('burn-link-modal');
+    const closeBurnModal = document.getElementById('close-burn-modal');
+    const burnNoteUrlInput = document.getElementById('burn-note-url-input');
+    const copyBurnUrlBtn = document.getElementById('copy-burn-url-btn');
+    const burnCopyFeedback = document.getElementById('burn-copy-feedback');
+    const burnClearNoteBtn = document.getElementById('burn-clear-note-btn');
+    const doneBurnModalBtn = document.getElementById('done-burn-modal-btn');
+
+    function openBurnLinkModal(url, isWholeNote) {
+        if (!burnLinkModal) return;
+        if (burnNoteUrlInput) {
+            burnNoteUrlInput.value = url;
+        }
+        if (burnCopyFeedback) {
+            burnCopyFeedback.innerText = "🔥 Link copied to your clipboard!";
+            burnCopyFeedback.style.color = "#00fff9";
+        }
+        if (burnClearNoteBtn) {
+            burnClearNoteBtn.style.display = isWholeNote ? 'inline-block' : 'none';
+        }
+        burnLinkModal.classList.remove('hidden');
+        if (burnNoteUrlInput) {
+            burnNoteUrlInput.focus();
+            burnNoteUrlInput.select();
+        }
+    }
+
+    if (closeBurnModal) closeBurnModal.addEventListener('click', () => burnLinkModal && burnLinkModal.classList.add('hidden'));
+    if (doneBurnModalBtn) doneBurnModalBtn.addEventListener('click', () => burnLinkModal && burnLinkModal.classList.add('hidden'));
+
+    if (copyBurnUrlBtn) {
+        copyBurnUrlBtn.addEventListener('click', async () => {
+            if (!burnNoteUrlInput || !burnNoteUrlInput.value) return;
+            const success = await copyToClipboard(burnNoteUrlInput.value, "🔥 Burn Link Copied!");
+            if (burnCopyFeedback) {
+                burnCopyFeedback.innerText = success ? "✅ Copied to clipboard!" : "Press Ctrl+C / Cmd+C to copy";
+                burnCopyFeedback.style.color = success ? "#00ff66" : "#ffb000";
+            }
+        });
+    }
+
+    if (burnClearNoteBtn) {
+        burnClearNoteBtn.addEventListener('click', () => {
+            if (editor) editor.value = '';
+            if (activeTabId && tabsData[activeTabId]) {
+                tabsData[activeTabId].content = '';
+            }
+            if (typeof saveWorkspace === 'function') saveWorkspace();
+            showToast("Note content erased from active tab.", "info");
+            if (burnLinkModal) burnLinkModal.classList.add('hidden');
+        });
+    }
+
     if (burnBtn) {
         burnBtn.addEventListener('click', async () => {
-            if (!editor) return;
-            const start = editor.selectionStart;
-            const end = editor.selectionEnd;
-            const selection = editor.value.substring(start, end);
-            let content = selection || editor.value;
+            let content = '';
+            let selection = '';
+            let start = 0;
+            let end = 0;
+
+            if (tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw')) {
+                content = tabsData[activeTabId].content || '';
+            } else if (editor) {
+                start = editor.selectionStart;
+                end = editor.selectionEnd;
+                selection = (start !== undefined && end !== undefined && start !== end) ? editor.value.substring(start, end) : '';
+                content = selection || editor.value;
+            }
             
-            if (!content.trim()) {
+            if (!content || !content.trim()) {
                 showToast("Nothing to burn! Write something first.", 'error');
                 return;
             }
 
-            const confirmed = await showCustomConfirm("Create Burn Note", "This will generate a self-destructing link that permanently erases after being read once. Proceed?");
-            if (!confirmed) return;
-
             try {
-                const token = generateToken();
+                showToast("🔥 Creating self-destruct note...", "info", 1500);
+                const burnId = 'bn' + Math.random().toString(36).substring(2, 14) + Math.random().toString(36).substring(2, 14);
                 const burnKey = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                let encryptedContent = content;
                 if (typeof CryptoJS !== 'undefined') {
-                    content = CryptoJS.AES.encrypt(content, burnKey).toString();
+                    encryptedContent = CryptoJS.AES.encrypt(content, burnKey).toString();
+                }
+                if (!db && typeof firebase !== 'undefined' && firebase.firestore) {
+                    db = firebase.firestore();
                 }
                 if (db) {
-                    await db.collection("burn_notes").doc(token).set({ content: content, created_at: firebase.firestore.FieldValue.serverTimestamp() });
+                    await db.collection("burn_notes").doc(burnId).set({
+                        content: encryptedContent,
+                        created_at: firebase.firestore.FieldValue.serverTimestamp()
+                    });
                 }
-                const burnUrl = `${window.location.origin}${window.location.pathname}?burn=${token}_${burnKey}`;
+                const burnUrl = `${window.location.origin}${window.location.pathname}?burn=${burnId}#${burnKey}`;
                 
                 await copyToClipboard(burnUrl, "🔥 Burn Link Copied! Send it to your recipient.");
                 
-                if (!selection) {
-                    if (db) await db.collection("workspaces").doc(currentToken).set({ burned: true }, { merge: true });
-                } else {
+                if (selection && editor) {
                     editor.value = editor.value.substring(0, start) + editor.value.substring(end);
-                    saveWorkspace();
+                    if (typeof saveWorkspace === 'function') saveWorkspace();
                 }
+
+                // Display the Burn Note Modal with the URL, copy button, and clear options
+                openBurnLinkModal(burnUrl, !selection);
             } catch (e) {
+                console.error("Burn note link generation error:", e);
                 showToast("Failed to create burn link.", 'error');
             }
         });
@@ -4715,6 +5832,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             try {
                 localStorage.removeItem(`qp_cached_${currentToken}`);
                 localStorage.removeItem(`qp_active_tab_${currentToken}`);
+                localStorage.removeItem('quickpad_last_active_hash');
             } catch (e) {}
 
             // Reset URL hash to origin so refreshing does not reload a dead token
@@ -4726,7 +5844,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     <div class='splash-badge' style='margin-bottom:15px;color:#ff0055;border-color:rgba(255,0,85,0.4);'>ZERO-TRACE ACTIVE</div>
                     <h1 class='glitch-text' data-text='WORKSPACE BURNED' style='color:#ff0055;text-shadow:0 0 24px rgba(255,0,85,0.6);margin-bottom:20px;'>WORKSPACE BURNED</h1>
                     <p style='color:#94a3b8;font-family:monospace;margin-bottom:30px;max-width:400px;text-align:center;'>This workspace has been permanently eradicated. All ciphertext, tabs, and keys were shredded from the server.</p>
-                    <button onclick="window.location.href=window.location.origin+window.location.pathname" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;">Create New Pad</button>
+                    <button onclick="if(window.createNewWorkspace){window.createNewWorkspace();}else{try{localStorage.removeItem('quickpad_last_active_hash');}catch(e){};var t=(Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12)+'_'+Math.random().toString(36).substring(2,12));try{localStorage.setItem('quickpad_last_active_hash',t);}catch(e){};window.location.href=window.location.origin+window.location.pathname+'#'+t;}" class="btn primary-action" style="font-size:1.05rem;padding:12px 28px;border-radius:10px;cursor:pointer;">Create New Pad</button>
                 </div>`;
         } catch (err) {
             console.error("Instant burn error:", err);
@@ -4740,50 +5858,69 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
     async function fetchBurnNote(tokenKey) {
         try {
+            if (!db && typeof firebase !== 'undefined' && firebase.firestore) {
+                db = firebase.firestore();
+            }
+            if (!db) {
+                if (editor) editor.value = "Database connection unavailable. Please check your internet connection.";
+                return;
+            }
+
             let token = tokenKey;
             let key = null;
-            if (tokenKey.includes('_')) {
-                let parts = tokenKey.split('_');
-                token = parts[0];
-                key = parts.slice(1).join('_');
+
+            // 1. Check if encryption key is in URL hash fragment (#key)
+            if (window.location.hash && window.location.hash.length > 1) {
+                key = window.location.hash.substring(1);
             }
-            
-            if (!db) return;
+
+            // 2. Check query params for key
+            if (!key) {
+                const urlParams = new URLSearchParams(window.location.search);
+                key = urlParams.get('key') || urlParams.get('k');
+            }
+
+            // 3. Fallback for legacy format with underscore (?burn=token_key or ?burn=part1_part2_part3_key)
+            if (!key && tokenKey && tokenKey.includes('_')) {
+                const lastIdx = tokenKey.lastIndexOf('_');
+                token = tokenKey.substring(0, lastIdx);
+                key = tokenKey.substring(lastIdx + 1);
+            }
+
             const docSnap = await db.collection("burn_notes").doc(token).get();
             if (docSnap.exists) { 
                 let content = docSnap.data().content;
-                if (key && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
+                if (key && content && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
                     try {
                         const bytes = CryptoJS.AES.decrypt(content, key);
                         const dec = bytes.toString(CryptoJS.enc.Utf8);
                         if (dec) content = dec;
-                    } catch(e) {}
+                    } catch(e) {
+                        console.error("AES Decryption error:", e);
+                    }
                 }
                 if (editor) {
                     editor.value = content; 
-                    showToast("🔥 Self-Destruct Activated: this note has been wiped from the server.", 'error', 6000);
+                    showToast("🔥 Self-Destruct Activated: this note has been wiped from the server.", 'error', 7000);
                 }
                 await db.collection("burn_notes").doc(token).delete(); 
             } else {
                 if (editor) {
-                    editor.value = "Note not found or already burned.";
+                    editor.value = "🔥 Note not found or already burned.\n\nThis self-destruct note has already been opened and permanently destroyed from the server.";
                     editor.style.color = "#ff4d6d";
                 }
+                showToast("This burn note has already been opened and destroyed.", "error", 6000);
             }
             updatePreview();
         } catch (e) {
+            console.error("Error retrieving burn note:", e);
             if (editor) editor.value = "Error retrieving burned note.";
         }
     }
 
     // --- Action Bar Triggers ---
     if (newBtn) {
-        newBtn.addEventListener('click', () => {
-            const freshToken = generateToken();
-            try { localStorage.setItem('quickpad_last_active_hash', freshToken); } catch(e){}
-            window.location.hash = `#${freshToken}`;
-            window.location.reload();
-        });
+        newBtn.addEventListener('click', createNewWorkspace);
     }
 
     if (timerBtn) {
@@ -4976,7 +6113,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     }
 
     // --- Universal Modal Backdrop & Escape Dismissal ---
-    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal, privacyInspectorModal, cardExportModal, voiceMaskModal];
+    const allModals = [infoModal, shareModal, profileModal, mergeModal, cmdPaletteModal, customDialogModal, collaboratorsModal, duressModal, stegModal, wormholeModal, privacyInspectorModal, cardExportModal, voiceMaskModal, burnLinkModal];
 
     allModals.forEach(modal => {
         if (!modal) return;
@@ -5000,20 +6137,6 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     if (closeCollaborators) closeCollaborators.addEventListener('click', () => collaboratorsModal && collaboratorsModal.classList.add('hidden'));
     if (closeCardModal) closeCardModal.addEventListener('click', () => cardExportModal && cardExportModal.classList.add('hidden'));
     if (closeVoiceMask) closeVoiceMask.addEventListener('click', () => { if (typeof closeVoiceMaskModal === 'function') closeVoiceMaskModal(); });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            allModals.forEach(m => m && m.classList.add('hidden'));
-            if (typeof closeVoiceMaskModal === 'function') closeVoiceMaskModal();
-            if (findReplaceBar) findReplaceBar.classList.add('hidden');
-            if (document.body.classList.contains('zen-mode')) document.body.classList.remove('zen-mode');
-            if (document.body.classList.contains('spotlight-active')) togglePresenterSpotlight();
-            if (isLaserActive) toggleLaserPointer(false);
-            if (codeRunnerDrawer && !codeRunnerDrawer.classList.contains('hidden')) codeRunnerDrawer.classList.add('hidden');
-            if (slashPopup) closeSlashPopup();
-            if (customDialogResolve) { customDialogResolve(null); customDialogResolve = null; }
-        }
-    });
 
     // --- Find & Replace Engine ---
     let currentFindMatches = [];
@@ -5101,6 +6224,10 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const val = editor.value;
             editor.value = val.substring(0, match.start) + repl + val.substring(match.end);
             if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                multiPane2Editor.value = editor.value;
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
             executeFind(true);
             saveWorkspace();
         });
@@ -5114,6 +6241,10 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const repl = replaceInput.value;
             editor.value = editor.value.split(query).join(repl);
             if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                multiPane2Editor.value = editor.value;
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
             executeFind();
             saveWorkspace();
             showToast("All instances replaced", 'success');
@@ -5270,6 +6401,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 updateHUD();
                 updatePreview();
                 tabsContentDirty = true;
+                dirtyTabIds.add(activeTabId);
                 saveWorkspace();
                 showToast(`Opened "${filename}" for editing`, 'success');
             } else {
@@ -5278,6 +6410,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 renderTabs();
                 switchTab(tid);
                 tabsContentDirty = true;
+                dirtyTabIds.add(activeTabId);
                 saveWorkspace();
                 showToast(`Imported "${filename}" into new tab`, 'success');
             }
@@ -5351,6 +6484,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 renderTabs();
                 switchTab(guideTid);
                 tabsContentDirty = true;
+                dirtyTabIds.add(activeTabId);
                 saveWorkspace();
                 showToast("Opened Example Guide in a new tab", "success");
             }
@@ -6636,6 +7770,10 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 if (stegExtractedText && editor) {
                     editor.value = stegExtractedText.value;
                     if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                multiPane2Editor.value = editor.value;
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
                     updatePreview();
                     updateHUD();
                     saveWorkspace();
@@ -7352,6 +8490,8 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         { name: "Find & Replace", shortcut: "⌘F", action: () => toggleFindBar() },
         { name: "Toggle Markdown Preview", shortcut: "Alt+M", action: () => mdToggleBtn && mdToggleBtn.click() },
         { name: "Toggle Split View", shortcut: "Alt+S", action: () => splitToggleBtn && splitToggleBtn.click() },
+        { name: "Multi-Note View: 2 Notes Side-by-Side", shortcut: "Alt+2", action: () => setMultiNoteLayout(multiNoteMode === 2 ? 1 : 2) },
+        { name: "Single Note View (Close Split Panes)", shortcut: "Alt+1", action: () => setMultiNoteLayout(1) },
         { name: "Toggle Zen Mode", shortcut: "Alt+Z", action: () => zenBtn && zenBtn.click() },
         { name: "Toggle Typewriter Scroll", shortcut: "Alt+T", action: () => toggleTypewriterMode() },
         { name: "Toggle Focus Dimming", shortcut: "Alt+H", action: () => toggleFocusMode() },
@@ -7454,70 +8594,242 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
     if (cmdPaletteBtn) cmdPaletteBtn.addEventListener('click', openCommandPalette);
 
-    document.addEventListener('keydown', (e) => {
-        // Cmd+K / Ctrl+K Palette
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-            e.preventDefault();
-            if (cmdPaletteModal && cmdPaletteModal.classList.contains('hidden')) openCommandPalette();
-            else if (cmdPaletteModal) cmdPaletteModal.classList.add('hidden');
+    // --- Unified Global Keyboard Shortcuts Engine (Capture Phase) ---
+    function isKeyMatch(e, codeName, charStr, macSymbol, keyCodeNum) {
+        if (e.code && e.code === codeName) return true;
+        if (e.key) {
+            const k = e.key.toLowerCase();
+            if (charStr && k === charStr.toLowerCase()) return true;
+            if (macSymbol && (e.key === macSymbol || k === macSymbol.toLowerCase())) return true;
         }
-        // Cmd+F / Ctrl+F Find
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        if (keyCodeNum && (e.keyCode === keyCodeNum || e.which === keyCodeNum)) return true;
+        return false;
+    }
+
+    function handleGlobalShortcuts(e) {
+        const activeEl = document.activeElement;
+        const isModalInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && activeEl !== editor;
+
+        // 1. Escape Key Handler (Dismiss modals, overlays, or double-tap Panic)
+        if (isKeyMatch(e, 'Escape', 'Escape', null, 27)) {
+            const now = Date.now();
+            if (now - lastEscapeTime < 350) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                togglePanicMode();
+                lastEscapeTime = 0;
+                return;
+            }
+            lastEscapeTime = now;
+
+            closeAllDropdowns();
+            if (typeof allModals !== 'undefined' && Array.isArray(allModals)) {
+                allModals.forEach(m => m && m.classList.add('hidden'));
+            }
+            if (typeof closeVoiceMaskModal === 'function') closeVoiceMaskModal();
+            if (typeof findReplaceBar !== 'undefined' && findReplaceBar) findReplaceBar.classList.add('hidden');
+            if (document.body.classList.contains('zen-mode')) document.body.classList.remove('zen-mode');
+            if (document.body.classList.contains('spotlight-active')) togglePresenterSpotlight();
+            if (typeof isLaserActive !== 'undefined' && isLaserActive) toggleLaserPointer(false);
+            if (typeof codeRunnerDrawer !== 'undefined' && codeRunnerDrawer && !codeRunnerDrawer.classList.contains('hidden')) {
+                codeRunnerDrawer.classList.add('hidden');
+            }
+            if (typeof slashPopup !== 'undefined' && slashPopup) closeSlashPopup();
+            if (typeof customDialogResolve === 'function') { customDialogResolve(null); customDialogResolve = null; }
+            if (typeof cmdPaletteModal !== 'undefined' && cmdPaletteModal && !cmdPaletteModal.classList.contains('hidden')) {
+                cmdPaletteModal.classList.add('hidden');
+            }
+            return;
+        }
+
+        // 2. Command Palette: Cmd+K / Ctrl+K
+        const isK = isKeyMatch(e, 'KeyK', 'k', null, 75);
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && isK) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
+            if (cmdPaletteModal && cmdPaletteModal.classList.contains('hidden')) {
+                openCommandPalette();
+            } else if (cmdPaletteModal) {
+                cmdPaletteModal.classList.add('hidden');
+            }
+            return;
+        }
+
+        // 3. Find & Replace: Cmd+F / Ctrl+F
+        const isF = isKeyMatch(e, 'KeyF', 'f', null, 70);
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && isF) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             toggleFindBar();
+            return;
         }
-        // Cmd+Enter / Ctrl+Enter Live Sandbox Runner
-        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+
+        // 4. Save Workspace: Cmd+S / Ctrl+S
+        const isS = isKeyMatch(e, 'KeyS', 's', 'ß', 83);
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && isS) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            saveWorkspace();
+            showToast("💾 Workspace saved locally!", 'success');
+            return;
+        }
+
+        // 5. Live Sandboxed Code Runner: Cmd+Enter / Ctrl+Enter
+        const isEnter = isKeyMatch(e, 'Enter', 'Enter', null, 13);
+        if ((e.metaKey || e.ctrlKey) && isEnter) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
             toggleCodeRunner(true);
+            return;
         }
-        // Alt+M / Option+M or Cmd+Shift+M Markdown
-        const isM = e.code === 'KeyM' || e.key.toLowerCase() === 'm' || e.key === 'µ';
-        if ((e.altKey && isM) || ((e.metaKey || e.ctrlKey) && e.shiftKey && isM)) {
+
+        // If the user is typing inside a modal input (e.g. Find bar input, password input, duress input),
+        // do not trigger view modes like Markdown or Split
+        if (isModalInput) return;
+
+        // Multi-Note Side-by-Side Shortcuts: Alt+1 (Single), Alt+2 (2 Notes), Alt+3 (3 Notes)
+        const isDigit1 = isKeyMatch(e, 'Digit1', '1', '¡', 49);
+        if (e.altKey && isDigit1) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
+            setMultiNoteLayout(1);
+            showToast("Single Note View", 'info');
+            return;
+        }
+
+        const isDigit2 = isKeyMatch(e, 'Digit2', '2', '™', 50);
+        if (e.altKey && isDigit2) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
+            const next = multiNoteMode === 2 ? 1 : 2;
+            setMultiNoteLayout(next);
+            showToast(next === 2 ? "2 Notes Side-by-Side" : "Single Note View", 'info');
+            return;
+        }
+
+        // 6. Markdown View Toggle: Alt+M / Option+M / Ctrl+M / Cmd+Shift+M / Ctrl+Shift+M
+        const isM = isKeyMatch(e, 'KeyM', 'm', 'µ', 77);
+        const isMarkdownShortcut = (e.altKey && isM) ||
+                                   (e.ctrlKey && !e.metaKey && !e.shiftKey && isM) ||
+                                   ((e.metaKey || e.ctrlKey) && e.shiftKey && isM);
+        if (isMarkdownShortcut) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             if (mdToggleBtn) mdToggleBtn.click();
+            return;
         }
-        // Alt+S / Option+S or Cmd+Shift+S Split
-        const isS = e.code === 'KeyS' || e.key.toLowerCase() === 's' || e.key === 'ß';
-        if ((e.altKey && isS) || ((e.metaKey || e.ctrlKey) && e.shiftKey && isS)) {
+
+        // 7. Split View Toggle: Alt+S / Option+S / Cmd+Shift+S / Ctrl+Shift+S
+        const isSplitShortcut = (e.altKey && isS) ||
+                                ((e.metaKey || e.ctrlKey) && e.shiftKey && isS);
+        if (isSplitShortcut) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             if (splitToggleBtn) splitToggleBtn.click();
+            return;
         }
-        // Alt+Z / Option+Z or Cmd+Shift+Z Zen
-        const isZ = e.code === 'KeyZ' || e.key.toLowerCase() === 'z' || e.key === 'Ω';
-        if ((e.altKey && isZ) || ((e.metaKey || e.ctrlKey) && e.shiftKey && isZ)) {
+
+        // 8. Zen Mode: Alt+Z / Option+Z
+        const isZ = isKeyMatch(e, 'KeyZ', 'z', 'Ω', 90);
+        if (e.altKey && isZ) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             if (document.body.classList.contains('zen-mode')) {
                 if (zenExitBtn) zenExitBtn.click();
             } else {
                 if (zenBtn) zenBtn.click();
             }
+            return;
         }
-        // Alt+T / Option+T Typewriter Scroll
-        const isT = e.code === 'KeyT' || e.key.toLowerCase() === 't' || e.key === '†';
-        if (e.altKey && isT) {
+
+        // 9. Typewriter Scroll Mode: Alt+T / Option+T / Cmd+Shift+T / Ctrl+Shift+T
+        const isT = isKeyMatch(e, 'KeyT', 't', '†', 84);
+        const isTypewriterShortcut = (e.altKey && isT) ||
+                                     ((e.metaKey || e.ctrlKey) && e.shiftKey && isT);
+        if (isTypewriterShortcut) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             toggleTypewriterMode();
+            return;
         }
-        // Alt+H / Option+H Focus Dimming
-        const isH = e.code === 'KeyH' || e.key.toLowerCase() === 'h' || e.key === '˙';
-        if (e.altKey && isH) {
+
+        // 10. Focus Dimming Mode: Alt+H / Option+H / Cmd+Shift+H / Ctrl+Shift+H
+        const isH = isKeyMatch(e, 'KeyH', 'h', '˙', 72);
+        const isFocusShortcut = (e.altKey && isH) ||
+                                ((e.metaKey || e.ctrlKey) && e.shiftKey && isH);
+        if (isFocusShortcut) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             toggleFocusMode();
+            return;
         }
-        // Alt+O / Option+O Presenter Spotlight
-        const isO = e.code === 'KeyO' || e.key.toLowerCase() === 'o' || e.key === 'ø';
-        if (e.altKey && isO) {
+
+        // 11. Presenter Spotlight: Alt+O / Option+O / Cmd+Shift+O / Ctrl+Shift+O
+        const isO = isKeyMatch(e, 'KeyO', 'o', 'ø', 79);
+        const isSpotlightShortcut = (e.altKey && isO) ||
+                                    ((e.metaKey || e.ctrlKey) && e.shiftKey && isO);
+        if (isSpotlightShortcut) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             togglePresenterSpotlight();
+            return;
         }
-        // Alt+L / Option+L Laser Pointer
-        const isL = e.code === 'KeyL' || e.key.toLowerCase() === 'l' || e.key === '¬';
-        if (e.altKey && isL) {
+
+        // 12. Laser Pointer: Alt+L / Option+L / Cmd+Shift+L / Ctrl+Shift+L
+        const isL = isKeyMatch(e, 'KeyL', 'l', '¬', 76);
+        const isLaserShortcut = (e.altKey && isL) ||
+                                ((e.metaKey || e.ctrlKey) && e.shiftKey && isL);
+        if (isLaserShortcut) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
             toggleLaserPointer();
+            return;
         }
-    });
+
+        // 13. Panic Button: Alt+P / Option+P / Cmd+Shift+P / Ctrl+Shift+P
+        const isP = isKeyMatch(e, 'KeyP', 'p', 'π', 80);
+        const isPanicShortcut = (e.altKey && isP) ||
+                                ((e.metaKey || e.ctrlKey) && e.shiftKey && isP);
+        if (isPanicShortcut) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            closeAllDropdowns();
+            togglePanicMode();
+            return;
+        }
+    }
+
+    // Capture phase event registration ensures shortcuts trigger inside Chrome Apps, PWAs,
+    // and while typing inside the editor textarea before macOS character composition can intercept them.
+    window.addEventListener('keydown', handleGlobalShortcuts, { capture: true });
+    document.addEventListener('keydown', handleGlobalShortcuts, { capture: true });
+    if (editor) editor.addEventListener('keydown', handleGlobalShortcuts, { capture: true });
 
     if (cmdInput) {
         cmdInput.addEventListener('keydown', (e) => {
