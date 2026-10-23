@@ -3485,17 +3485,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (cid === myDeviceId) continue;
             const c = peerCursorsData[cid];
             if (!c) continue;
-            // Prune if inactive for more than 16 seconds and purge stale ghost records from cloud
-            if (c.timestamp && (now - c.timestamp > 16000)) {
+            // Prune if inactive for more than 45 seconds (using local receiver time to eliminate clock skew)
+            const lastSeen = c.lastSeenLocalTime || c.timestamp || now;
+            if (now - lastSeen > 45000) {
                 removePeerCursor(cid);
                 delete peerCursorsData[cid];
-                if (db && currentToken && !isBurnMode) {
-                    try {
-                        const delPayload = {};
-                        delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
-                        db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
-                    } catch(e) {}
-                }
                 continue;
             }
             activeUsers.set(cid, {
@@ -3606,7 +3600,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (typeof updatePresenceUI === 'function') {
             updatePresenceUI();
         }
-    }, 4000);
+    }, 3000);
+
+    // Announce immediate presence when mobile or desktop tab regains visibility
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            if (typeof syncMyCursor === 'function') {
+                syncMyCursor(true);
+            }
+            if (typeof updatePresenceUI === 'function') {
+                updatePresenceUI();
+            }
+        }
+    });
 
     // --- Non-Blocking Real-Time 3-Way Concurrent Merge Engine ---
     function computeChange(oldStr, newStr) {
@@ -4115,18 +4121,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 if (cid === myDeviceId) continue;
                                 let c = data.cursors[cid];
                                 if (!c) continue;
-                                if (c.timestamp && (now - c.timestamp > 16000)) {
-                                    removePeerCursor(cid);
-                                    delete peerCursorsData[cid];
-                                    if (db && currentToken && !isBurnMode) {
-                                        try {
-                                            const delPayload = {};
-                                            delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
-                                            db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
-                                        } catch(e) {}
-                                    }
-                                    continue;
-                                }
                                 const isNewPeer = !peerCursorsData[cid];
                                 peerCursorsData[cid] = {
                                     pos: typeof c.pos === 'number' ? c.pos : 0,
@@ -4135,7 +4129,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     tabId: c.tabId || 'main',
                                     avatar: c.avatar || '',
                                     speaking: !!c.speaking,
-                                    timestamp: c.timestamp || now
+                                    timestamp: c.timestamp || now,
+                                    lastSeenLocalTime: now
                                 };
                                 activeUsers.set(cid, {
                                     name: c.name || 'Anon',
@@ -4209,11 +4204,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
                             }
 
-                            // Prune peers that timed out (> 16s) (unless connected as local tab)
+                            // Prune peers that timed out (> 45s) (unless connected as local tab)
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
                                 const p = peerCursorsData[existingCid];
-                                if (!p.isLocalTab && p.timestamp && (now - p.timestamp > 16000)) {
+                                const pLastSeen = p.lastSeenLocalTime || p.timestamp || now;
+                                if (!p.isLocalTab && (now - pLastSeen > 45000)) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -4224,11 +4220,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 updatePresenceUI();
                             }
                         } else {
-                            // If data.cursors is null/missing, clean up peers that timed out
+                            // If data.cursors is null/missing, clean up peers that timed out (> 45s)
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
                                 const p = peerCursorsData[existingCid];
-                                if (!p.isLocalTab && p.timestamp && (now - p.timestamp > 16000)) {
+                                const pLastSeen = p.lastSeenLocalTime || p.timestamp || now;
+                                if (!p.isLocalTab && (now - pLastSeen > 45000)) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -5341,13 +5338,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 updated_at: Date.now(),
                 last_writer: myDeviceId
             };
-            if (isInitialSave) {
-                payload.cursors = {
-                    [myDeviceId]: myCursorData
-                };
-            } else {
-                payload[`cursors.${myDeviceId}`] = myCursorData;
-            }
+            payload[`cursors.${myDeviceId}`] = myCursorData;
 
             broadcastLocalSync({
                 type: 'cursor_presence',
@@ -5702,8 +5693,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         
         // Responsive throttling:
         // - Remote peers active: throttle cursor updates to once every 350ms for live tracking
-        // - Alone in room: heartbeat update every 7 seconds to keep presence alive in document
-        const minInterval = hasRemotePeers ? 350 : 7000;
+        // - Alone or background: heartbeat update every 2.5 seconds to keep presence fresh
+        const minInterval = hasRemotePeers ? 350 : 2500;
         const elapsed = now - lastFirestoreCursorSync;
 
         if (!forceCloud && elapsed < minInterval) {
@@ -5727,11 +5718,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         db.collection("workspaces").doc(currentToken).update(updatePayload).catch(err => {
             // Fallback to set with merge if document or field structure needs initialization
             if (currentToken && !isBurnMode) {
-                db.collection("workspaces").doc(currentToken).set({
-                    cursors: {
-                        [myDeviceId]: cursorData
-                    }
-                }, { merge: true }).catch(() => {});
+                db.collection("workspaces").doc(currentToken).set(updatePayload, { merge: true }).catch(() => {});
             }
         });
     }
