@@ -1,4 +1,4 @@
-// QuickPad v4.5 - Universal Client Script
+// QuickPad v2.0 - Universal Client Script
 (function() {
     'use strict';
 
@@ -21,29 +21,6 @@
 
     // iOS Keyboard Dismiss Fix
     window.addEventListener('focusout', () => window.scrollTo(0, 0));
-
-    // macOS Platform Detection & Dynamic Keyboard Label Adapter
-    const isMacPlatform = (typeof navigator !== 'undefined') && (
-        (navigator.platform && navigator.platform.toUpperCase().indexOf('MAC') >= 0) ||
-        (navigator.userAgent && navigator.userAgent.toUpperCase().indexOf('MAC') >= 0)
-    );
-
-    function adaptMacKeyboardBadges() {
-        if (!isMacPlatform) return;
-        document.querySelectorAll('kbd').forEach(el => {
-            if (el.textContent.includes('Alt+')) {
-                el.textContent = el.textContent.replace('Alt+', '⌥');
-            }
-        });
-        document.querySelectorAll('[title*="Alt+"]').forEach(el => {
-            el.title = el.title.replace(/Alt\+/g, '⌥');
-        });
-        document.querySelectorAll('.menu-action-btn, .header-icon-btn').forEach(el => {
-            if (el.title && el.title.includes('Ctrl+T')) {
-                el.title = el.title.replace('Ctrl+T', '⌥N');
-            }
-        });
-    }
 
     let isAppInitialized = false;
     let lastKnownHash = window.location.hash;
@@ -371,15 +348,6 @@
     let isMarkdown = false;
     let isBurnMode = false;
     let isReadOnly = false;
-    let closeAllDropdowns = function() {
-        document.querySelectorAll('.dropdown-menu').forEach(m => {
-            m.classList.remove('show');
-            m.classList.remove('hidden');
-        });
-        document.querySelectorAll('.dropdown-group').forEach(g => {
-            g.classList.remove('active');
-        });
-    };
     let currentToken = '';
     let urlKey = null;
     let vaultPassword = null;
@@ -448,100 +416,6 @@
     let myPublicKeyJwk = null;
     let currentActiveUsers = new Map();
 
-    // Collaborator Neon Color Palette
-    const PEER_COLORS = [
-        { color: '#00fff9', text: '#000' }, // Cyan
-        { color: '#00ff88', text: '#000' }, // Emerald
-        { color: '#ff007f', text: '#fff' }, // Hot Pink
-        { color: '#ffd600', text: '#000' }, // Gold
-        { color: '#a855f7', text: '#fff' }, // Purple
-        { color: '#ff6b35', text: '#fff' }, // Orange
-        { color: '#38bdf8', text: '#000' }  // Sky Blue
-    ];
-
-    function getPeerColor(peerId) {
-        let hash = 0;
-        const str = peerId || 'anon';
-        for (let i = 0; i < str.length; i++) hash = (hash << 5) - hash + str.charCodeAt(i);
-        const index = Math.abs(hash) % PEER_COLORS.length;
-        return PEER_COLORS[index];
-    }
-
-    // --- Remote Tab Active Glow Engine ---
-    // Tracks when remote peers are actively typing/editing notes not currently viewed by local user
-    const remoteTabActivity = new Map(); // tid -> { timestamp, peerId, peerName, color, timeoutId }
-
-    function isTabCurrentlyViewedLocally(tid) {
-        if (!tid) return false;
-        if (tid === activeTabId) return true;
-        if (multiNoteMode === 2 && multiPaneTabs && multiPaneTabs.pane2 === tid) return true;
-        return false;
-    }
-
-    function triggerTabRemoteActivity(tid, peerId, peerName) {
-        if (!tid) return;
-        if (isTabCurrentlyViewedLocally(tid)) {
-            clearTabRemoteActivity(tid);
-            return;
-        }
-
-        const peerInfo = (peerId && peerCursorsData && peerCursorsData[peerId]) ? peerCursorsData[peerId] : null;
-        const resolvedName = peerName || (peerInfo ? peerInfo.name : 'Collaborator');
-        const colorObj = getPeerColor(peerId || 'remote');
-
-        const existing = remoteTabActivity.get(tid);
-        if (existing && existing.timeoutId) {
-            clearTimeout(existing.timeoutId);
-        }
-
-        const timeoutId = setTimeout(() => {
-            clearTabRemoteActivity(tid);
-        }, 3200);
-
-        remoteTabActivity.set(tid, {
-            timestamp: Date.now(),
-            peerId: peerId || 'remote',
-            peerName: resolvedName,
-            color: colorObj.color,
-            timeoutId: timeoutId
-        });
-
-        applyTabGlowUI(tid, true, colorObj.color, resolvedName);
-    }
-
-    function clearTabRemoteActivity(tid) {
-        if (!tid) return;
-        const existing = remoteTabActivity.get(tid);
-        if (existing) {
-            if (existing.timeoutId) clearTimeout(existing.timeoutId);
-            remoteTabActivity.delete(tid);
-        }
-        applyTabGlowUI(tid, false);
-    }
-
-    function applyTabGlowUI(tid, isGlowing, color, peerName) {
-        if (!tabsContainer || !tid) return;
-        const tabEl = tabsContainer.querySelector(`.tab[data-tid="${tid}"]`);
-        if (tabEl) {
-            if (isGlowing) {
-                tabEl.classList.add('remote-active');
-                if (color) tabEl.style.setProperty('--remote-color', color);
-                if (peerName && tabsData[tid]) {
-                    tabEl.title = `✍️ ${peerName} is editing "${tabsData[tid].name}"`;
-                }
-            } else {
-                tabEl.classList.remove('remote-active');
-                tabEl.style.removeProperty('--remote-color');
-                if (tabsData[tid]) {
-                    tabEl.title = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name + ' (Drag to reorder • Right-click for options)';
-                }
-            }
-        }
-        if (multiNoteMode === 2 && multiPane2Select && typeof updateMultiPaneSelectors === 'function') {
-            updateMultiPaneSelectors();
-        }
-    }
-
     // v3.0 Power Suite State
     let isTypewriterMode = false;
     let isFocusMode = false;
@@ -600,8 +474,8 @@
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
 
-    // v4.5 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.5 Pro
+    // v4.4 Pro Welcome Template
+    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.4 Pro
 
 Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
 Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
@@ -618,7 +492,7 @@ Everything you type is encrypted directly in your browser with AES-256 before le
 ### 💡 Pro Tips & Shortcuts
 - **⚡ Command Palette:** Press \`Cmd+K\` (or \`Ctrl+K\`) for instant actions and recent notes.
 - **📄 Document Upload:** Upload or drag & drop Word documents (\`.docx\`), PDFs, Markdown, text, and code files to edit them directly.
-- **🎨 Markdown Preview:** Press \`Option+M\` / \`Cmd+M\` on Mac (or \`Alt+M\` on Windows) / \`Option+S\` for Split View.
+- **🎨 Markdown Preview:** Press \`Alt+M\` (or \`Alt+S\` for Split View).
 - **🎨 Whiteboard:** Add a new tab ending in \`.draw\` (e.g. \`sketch.draw\`) for real-time drawing.
 - **🔒 Secret Vault:** Right-click or lock any tab with a passphrase for nested privacy.
 - **🕶️ Panic Camouflage:** Press \`Alt+P\` or double-tap \`Esc\` to instantly disguise your screen.
@@ -2390,7 +2264,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         let activeGroup = null;
         let closeTimeout = null;
 
-        closeAllDropdowns = function() {
+        function closeAllDropdowns() {
             clearTimeout(closeTimeout);
             document.querySelectorAll('.dropdown-menu').forEach(m => {
                 m.classList.remove('show');
@@ -2401,7 +2275,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             });
             activeMenu = null;
             activeGroup = null;
-        };
+        }
 
         dropdownGroups.forEach(group => {
             const menu = group.querySelector('.dropdown-menu');
@@ -3134,23 +3008,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             await initCrypto();
             if (tabsBar) tabsBar.classList.remove('hidden');
             if (liveHud) liveHud.classList.remove('hidden');
+            renderTabs();
             if (currentToken) {
-                try {
-                    const cachedTabs = localStorage.getItem('quickpad_cached_tabs_' + currentToken);
-                    if (cachedTabs) {
-                        const parsedTabs = JSON.parse(cachedTabs);
-                        if (parsedTabs && typeof parsedTabs === 'object' && Object.keys(parsedTabs).length > 0) {
-                            tabsData = parsedTabs;
-                            const savedActive = localStorage.getItem('quickpad_active_tab_' + currentToken);
-                            if (savedActive && tabsData[savedActive]) {
-                                activeTabId = savedActive;
-                            }
-                            if (editor && tabsData[activeTabId]) {
-                                editor.value = tabsData[activeTabId].content || '';
-                            }
-                        }
-                    }
-                } catch(e){}
                 try {
                     const savedOrder = localStorage.getItem('quickpad_tab_order_' + currentToken);
                     if (savedOrder) {
@@ -3158,6 +3017,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         if (Array.isArray(parsed) && parsed.length > 0) {
                             tabOrder = parsed;
                             ensureTabOrder();
+                            renderTabs();
                         }
                     }
                 } catch(e){}
@@ -3168,7 +3028,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     }
                 } catch(e){}
             }
-            renderTabs();
             initBroadcastSync(currentToken);
             setupRealtimeSync(currentToken);
         }
@@ -3187,7 +3046,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         initPomodoroTimer();
         initCardExporter();
         initSharePassProtection();
-        adaptMacKeyboardBadges();
     }
 
     function initHorizontalScrollbars() {
@@ -3262,9 +3120,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             // If tab is secret on this tab and not unlocked, ignore local broadcast
                             if (tabsData[data.tid].is_secret && !tabsData[data.tid].secret_pass) {
                                 return;
-                            }
-                            if (data.senderId !== myDeviceId) {
-                                triggerTabRemoteActivity(data.tid, data.senderId, (peerCursorsData[data.senderId] ? peerCursorsData[data.senderId].name : null));
                             }
                             tabsData[data.tid].content = data.content;
                             lastSavedTabsJSON = JSON.stringify(tabsData);
@@ -3356,11 +3211,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             renderPeerCursor(data.senderId, data.cursor.pos, data.cursor.name, tabId);
                         } else {
                             removePeerCursor(data.senderId);
-                            if (data.senderId !== myDeviceId && data.cursor.tabId) {
-                                if (data.cursor.typing || data.cursor.isTyping) {
-                                    triggerTabRemoteActivity(data.cursor.tabId, data.senderId, data.cursor.name);
-                                }
-                            }
                         }
                         if (typeof updatePresenceUI === 'function') {
                             updatePresenceUI();
@@ -3380,37 +3230,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     }
                 } else if (data.type === 'laser_presence') {
                     if (data.laser && data.laser.active) {
-                        const lTab = data.laser.tabId || (peerCursorsData[data.senderId] ? peerCursorsData[data.senderId].tabId : 'main');
-                        const lx = typeof data.laser.x === 'number' ? data.laser.x : null;
-                        const ly = typeof data.laser.y === 'number' ? data.laser.y : null;
-                        const now = Date.now();
-                        if (lx !== null && ly !== null) {
-                            if (!remoteLasers[data.senderId]) {
-                                remoteLasers[data.senderId] = {
-                                    x: lx,
-                                    y: ly,
-                                    targetX: lx,
-                                    targetY: ly,
-                                    trail: [],
-                                    color: data.laser.color || getPeerColor(data.senderId).color,
-                                    name: data.laser.name || 'Collaborator',
-                                    tabId: lTab,
-                                    active: true,
-                                    opacity: 1,
-                                    lastUpdate: now
-                                };
-                            } else {
-                                const rl = remoteLasers[data.senderId];
-                                rl.targetX = lx;
-                                rl.targetY = ly;
-                                rl.color = data.laser.color || rl.color;
-                                rl.name = data.laser.name || rl.name;
-                                rl.tabId = lTab;
-                                rl.active = true;
-                                rl.opacity = 1;
-                                rl.lastUpdate = now;
-                            }
-                        }
+                        remoteLasers[data.senderId] = {
+                            x: data.laser.x,
+                            y: data.laser.y,
+                            targetX: data.laser.x,
+                            targetY: data.laser.y,
+                            trail: [],
+                            color: data.laser.color,
+                            name: data.laser.name,
+                            active: true,
+                            opacity: 1,
+                            lastUpdate: Date.now()
+                        };
                     } else {
                         delete remoteLasers[data.senderId];
                     }
@@ -3485,11 +3316,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (cid === myDeviceId) continue;
             const c = peerCursorsData[cid];
             if (!c) continue;
-            // Prune if inactive for more than 45 seconds (using local receiver time to eliminate clock skew)
-            const lastSeen = c.lastSeenLocalTime || c.timestamp || now;
-            if (now - lastSeen > 45000) {
+            // Prune if inactive for more than 16 seconds and purge stale ghost records from cloud
+            if (c.timestamp && (now - c.timestamp > 16000)) {
                 removePeerCursor(cid);
                 delete peerCursorsData[cid];
+                if (db && currentToken && !isBurnMode) {
+                    try {
+                        const delPayload = {};
+                        delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
+                        db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
+                    } catch(e) {}
+                }
                 continue;
             }
             activeUsers.set(cid, {
@@ -3600,19 +3437,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (typeof updatePresenceUI === 'function') {
             updatePresenceUI();
         }
-    }, 3000);
-
-    // Announce immediate presence when mobile or desktop tab regains visibility
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            if (typeof syncMyCursor === 'function') {
-                syncMyCursor(true);
-            }
-            if (typeof updatePresenceUI === 'function') {
-                updatePresenceUI();
-            }
-        }
-    });
+    }, 4000);
 
     // --- Non-Blocking Real-Time 3-Way Concurrent Merge Engine ---
     function computeChange(oldStr, newStr) {
@@ -3706,11 +3531,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
     // --- Real-Time Firestore Synchronization ---
     let lastSeenServerTimestamp = 0;
-    let hasLoadedInitialCloudSnapshot = false;
     function setupRealtimeSync(token) {
         if (!db) return;
         if (unsubscribeWorkspace) unsubscribeWorkspace();
-        hasLoadedInitialCloudSnapshot = false;
         initStrokesListener();
 
         // Immediately announce presence to Firestore upon room connection
@@ -3730,9 +3553,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         if (data.updated_at) {
                             lastSeenServerTimestamp = Math.max(lastSeenServerTimestamp, data.updated_at);
                         }
-
-                        const isInitialLoad = !hasLoadedInitialCloudSnapshot;
-                        hasLoadedInitialCloudSnapshot = true;
 
                         // If snapshot is an echo of this tab's own recent write, update baseline & skip clobbering editor
                         const isSelfWriter = (data.last_writer === myDeviceId);
@@ -3758,9 +3578,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 localStorage.removeItem('quickpad_last_active_hash');
                                 localStorage.removeItem(`qp_cached_${token}`);
                                 localStorage.removeItem(`qp_active_tab_${token}`);
-                                localStorage.removeItem(`quickpad_cached_tabs_${token}`);
-                                localStorage.removeItem(`quickpad_active_tab_${token}`);
-                                localStorage.removeItem(`quickpad_tab_order_${token}`);
                             } catch(e) {}
                             window.history.replaceState({}, '', window.location.origin + window.location.pathname);
                             document.body.innerHTML = `
@@ -3798,11 +3615,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             }
                         }
 
-                        // Synchronize workspace tabs: Always hydrate on initial snapshot and when missing tabs or order updates are discovered, even if self was the last writer
-                        const hasMissingTabs = data.tabs && Object.keys(data.tabs).some(tid => !tabsData[tid]);
-                        const hasOrderMismatch = Array.isArray(data.tab_order) && data.tab_order.length > 0 && JSON.stringify(tabOrder) !== JSON.stringify(data.tab_order);
-                        const shouldSyncTabs = (!isSelfWriter || isInitialLoad || hasMissingTabs || hasOrderMismatch) && (data.tabs || data.content);
-                        if (shouldSyncTabs) {
+                        // Synchronize workspace tabs if tabs or legacy content are present in the snapshot (skip if self writer to avoid clobbering editor)
+                        if (!isSelfWriter && (data.tabs || data.content)) {
                             let tabsUpdated = false;
                             if (Array.isArray(data.tab_order) && data.tab_order.length > 0) {
                                 if (JSON.stringify(tabOrder) !== JSON.stringify(data.tab_order)) {
@@ -3812,16 +3626,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             }
                             let serverTabs = data.tabs || {};
                             if (data.content && !data.tabs) serverTabs = { 'main': { name: 'main.txt', content: data.content, is_encrypted: data.is_encrypted } };
-
-                            // On initial load, restore previously active tab if available in server snapshot
-                            if (isInitialLoad) {
-                                try {
-                                    const savedActiveTab = localStorage.getItem('quickpad_active_tab_' + token);
-                                    if (savedActiveTab && serverTabs[savedActiveTab]) {
-                                        activeTabId = savedActiveTab;
-                                    }
-                                } catch(e) {}
-                            }
                             
                             // Decrypt all server tab contents
                             for (let tid in serverTabs) {
@@ -3973,18 +3777,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     const isDirtyLocally = dirtyTabIds.has(tid);
                                     const isCurrentlyTypingInThisTab = isTypingInTab(tid);
 
-                                    if (serverChanged && (!isSelfWriter || isInitialLoad)) {
+                                    if (serverChanged) {
                                         let finalContent = content;
                                         let newCursorPos = null;
-
-                                        // Glow the tab if a collaborator changed its content and local user is not viewing it
-                                        if (data.last_writer && data.last_writer !== myDeviceId) {
-                                            const writerPeer = peerCursorsData[data.last_writer];
-                                            const writerName = writerPeer ? writerPeer.name : null;
-                                            triggerTabRemoteActivity(tid, data.last_writer, writerName);
-                                        } else if (!data.last_writer) {
-                                            triggerTabRemoteActivity(tid, null, null);
-                                        }
 
                                         if (isDirtyLocally && isCurrentlyTypingInThisTab) {
                                             // Non-blocking 3-way concurrent merge!
@@ -4075,22 +3870,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     editor.value = tabsData[firstTab].content || '';
                                     editor.readOnly = isReadOnly;
                                 }
-                            } else if (isInitialLoad) {
-                                const isDraw = tabsData[activeTabId] && tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
-                                if (isDraw) {
-                                    switchTab(activeTabId, true);
-                                } else if (editor) {
-                                    editor.value = tabsData[activeTabId].content || '';
-                                    editor.readOnly = isReadOnly;
-                                    updatePreview();
-                                    updateHUD();
-                                }
                             }
                             
                             lastSavedTabsJSON = JSON.stringify(tabsData);
-                            try { localStorage.setItem('quickpad_cached_tabs_' + token, lastSavedTabsJSON); } catch(e){}
-                            if (tabsUpdated || isInitialLoad) renderTabs();
-                            updateMultiPaneSelectors();
+                            if (tabsUpdated) renderTabs();
                             if (typeof checkLockedTabUI === 'function') checkLockedTabUI(activeTabId);
                         }
 
@@ -4121,6 +3904,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 if (cid === myDeviceId) continue;
                                 let c = data.cursors[cid];
                                 if (!c) continue;
+                                if (c.timestamp && (now - c.timestamp > 16000)) {
+                                    removePeerCursor(cid);
+                                    delete peerCursorsData[cid];
+                                    if (db && currentToken && !isBurnMode) {
+                                        try {
+                                            const delPayload = {};
+                                            delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
+                                            db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
+                                        } catch(e) {}
+                                    }
+                                    continue;
+                                }
                                 const isNewPeer = !peerCursorsData[cid];
                                 peerCursorsData[cid] = {
                                     pos: typeof c.pos === 'number' ? c.pos : 0,
@@ -4129,8 +3924,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     tabId: c.tabId || 'main',
                                     avatar: c.avatar || '',
                                     speaking: !!c.speaking,
-                                    timestamp: c.timestamp || now,
-                                    lastSeenLocalTime: now
+                                    timestamp: c.timestamp || now
                                 };
                                 activeUsers.set(cid, {
                                     name: c.name || 'Anon',
@@ -4145,9 +3939,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     renderPeerCursor(cid, c.pos, c.name, c.tabId);
                                 } else {
                                     removePeerCursor(cid);
-                                    if (c.tabId && c.timestamp && (now - c.timestamp < 3500) && (c.typing || c.isTyping)) {
-                                        triggerTabRemoteActivity(c.tabId, cid, c.name);
-                                    }
                                 }
 
                                 // Check remote cursor emoji flare
@@ -4163,7 +3954,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     const rx = typeof c.laser.x === 'number' ? c.laser.x : null;
                                     const ry = typeof c.laser.y === 'number' ? c.laser.y : null;
                                     if (rx !== null && ry !== null) {
-                                        const laserTab = (c.laser && c.laser.tabId) ? c.laser.tabId : (c.tabId || null);
                                         if (!remoteLasers[cid]) {
                                             remoteLasers[cid] = {
                                                 x: rx,
@@ -4173,7 +3963,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                                 trail: [],
                                                 color: c.laser.color || getPeerColor(cid).color,
                                                 name: c.laser.name || c.name || 'Collaborator',
-                                                tabId: laserTab,
                                                 active: true,
                                                 opacity: 1,
                                                 lastUpdate: now
@@ -4184,7 +3973,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                             rl.targetY = ry;
                                             rl.color = c.laser.color || rl.color;
                                             rl.name = c.laser.name || c.name || rl.name;
-                                            rl.tabId = laserTab;
                                             rl.active = true;
                                             rl.opacity = 1;
                                             rl.lastUpdate = now;
@@ -4204,12 +3992,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
                             }
 
-                            // Prune peers that timed out (> 45s) (unless connected as local tab)
+                            // Prune peers that timed out (> 16s) (unless connected as local tab)
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
                                 const p = peerCursorsData[existingCid];
-                                const pLastSeen = p.lastSeenLocalTime || p.timestamp || now;
-                                if (!p.isLocalTab && (now - pLastSeen > 45000)) {
+                                if (!p.isLocalTab && p.timestamp && (now - p.timestamp > 16000)) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -4220,12 +4007,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 updatePresenceUI();
                             }
                         } else {
-                            // If data.cursors is null/missing, clean up peers that timed out (> 45s)
+                            // If data.cursors is null/missing, clean up peers that timed out
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
                                 const p = peerCursorsData[existingCid];
-                                const pLastSeen = p.lastSeenLocalTime || p.timestamp || now;
-                                if (!p.isLocalTab && (now - pLastSeen > 45000)) {
+                                if (!p.isLocalTab && p.timestamp && (now - p.timestamp > 16000)) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -4457,23 +4243,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             t.setAttribute('data-tid', tid);
             t.draggable = true;
 
-            let remoteDot = document.createElement('span');
-            remoteDot.className = 'tab-remote-dot';
-            t.appendChild(remoteDot);
-
             let titleSpan = document.createElement('span');
             titleSpan.className = 'tab-title';
             titleSpan.innerText = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
             t.appendChild(titleSpan);
-
-            // Restore remote active glow if this note is currently being edited by a collaborator
-            const isCurrentlyInTab = isTabCurrentlyViewedLocally(tid);
-            const remoteActivity = remoteTabActivity.get(tid);
-            if (remoteActivity && !isCurrentlyInTab && (Date.now() - remoteActivity.timestamp < 3500)) {
-                t.classList.add('remote-active');
-                if (remoteActivity.color) t.style.setProperty('--remote-color', remoteActivity.color);
-                t.title = `✍️ ${remoteActivity.peerName || 'Collaborator'} is editing "${tabsData[tid].name}"`;
-            }
 
             let delBtn = document.createElement('span');
             delBtn.className = 'tab-close';
@@ -4483,7 +4256,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 e.stopPropagation();
                 const confirmed = await showCustomConfirm("Delete Tab", `Are you sure you want to delete tab "${tabsData[tid].name}"?`);
                 if (confirmed) {
-                    clearTabRemoteActivity(tid);
                     delete tabsData[tid];
                     tabOrder = tabOrder.filter(id => id !== tid);
                     ensureTabOrder();
@@ -4704,9 +4476,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (activeTabEl && tabsBar) {
             activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         }
-        if (typeof updateMultiPaneSelectors === 'function') {
-            updateMultiPaneSelectors();
-        }
     }
 
     async function deleteActiveTab() {
@@ -4715,7 +4484,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         const confirmed = await showCustomConfirm("Delete Tab", `Are you sure you want to delete tab "${tabName}"?`);
         if (confirmed) {
             const tid = activeTabId;
-            clearTabRemoteActivity(tid);
             delete tabsData[tid];
             dirtyTabIds.add(tid);
             isTabOrderDirty = true;
@@ -4755,12 +4523,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (isSplitMode) {
                 isSplitMode = false;
                 document.body.classList.remove('split-mode');
-                if (splitToggleBtn) splitToggleBtn.innerHTML = `<span>🌗 Split View</span><kbd>${isMacPlatform ? '⌥S' : 'Alt+S'}</kbd>`;
+                if (splitToggleBtn) splitToggleBtn.innerHTML = '<span>🌗 Split View</span><kbd>Alt+S</kbd>';
             }
             if (isMarkdown) {
                 isMarkdown = false;
                 updateViewVisibility();
-                if (mdToggleBtn) mdToggleBtn.innerHTML = `<span>👁️ Markdown Preview</span><kbd>${isMacPlatform ? '⌥M' : 'Alt+M'}</kbd>`;
+                if (mdToggleBtn) mdToggleBtn.innerHTML = '<span>👁️ Markdown Preview</span><kbd>Alt+M</kbd>';
             }
         }
 
@@ -4813,36 +4581,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         try { localStorage.setItem('quickpad_multi_note_' + currentToken, '2'); } catch(e){}
         updateAllVisiblePeerCursors();
         syncMyCursor();
-        if (isLaserActive) {
-            laserTrail = [];
-            broadcastLaser(true);
-        }
     }
 
     function updateMultiPaneSelectors() {
         ensureTabOrder();
         if (multiPane2Select) {
-            const currentSelected = multiPaneTabs.pane2;
-            if (!currentSelected || !tabsData[currentSelected]) {
-                const candidate = tabOrder.find(id => id !== activeTabId && tabsData[id]);
-                multiPaneTabs.pane2 = candidate || activeTabId || tabOrder[0];
-            }
             multiPane2Select.innerHTML = '';
-
-            const allTids = [...tabOrder];
-            if (tabsData) {
-                for (let tid in tabsData) {
-                    if (!allTids.includes(tid)) allTids.push(tid);
-                }
-            }
-
-            allTids.forEach(tid => {
+            tabOrder.forEach(tid => {
                 if (!tabsData[tid]) return;
                 const opt = document.createElement('option');
                 opt.value = tid;
-                const isRemoteActive = remoteTabActivity.has(tid) && !isTabCurrentlyViewedLocally(tid);
-                const prefix = isRemoteActive ? '✍️ ' : (tabsData[tid].is_secret ? '🔒 ' : '');
-                opt.innerText = prefix + tabsData[tid].name;
+                opt.innerText = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name;
                 if (tid === multiPaneTabs.pane2) opt.selected = true;
                 multiPane2Select.appendChild(opt);
             });
@@ -4908,16 +4657,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
     function selectTabInMultiPane(paneNum = 2, tid) {
         if (!tid || !tabsData[tid]) return;
-        clearTabRemoteActivity(tid);
         multiPaneTabs.pane2 = tid;
         updateMultiPaneSelectors();
         loadMultiPaneContent(2);
         updateAllVisiblePeerCursors();
         syncMyCursor();
-        if (isLaserActive) {
-            laserTrail = [];
-            broadcastLaser(true);
-        }
     }
 
     function onMultiPaneInput(paneNum = 2) {
@@ -4980,9 +4724,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     }
 
     if (multiPane2Select) {
-        multiPane2Select.addEventListener('mousedown', updateMultiPaneSelectors);
-        multiPane2Select.addEventListener('pointerdown', updateMultiPaneSelectors);
-        multiPane2Select.addEventListener('focus', updateMultiPaneSelectors);
         multiPane2Select.addEventListener('change', (e) => selectTabInMultiPane(2, e.target.value));
     }
 
@@ -5152,8 +4893,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
         
         activeTabId = tid; 
-        laserTrail = [];
-        clearTabRemoteActivity(tid);
         if (currentToken) {
             try { localStorage.setItem('quickpad_active_tab_' + currentToken, tid); } catch(e){}
         }
@@ -5192,10 +4931,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         updateHUD();
         updateAllVisiblePeerCursors();
         syncMyCursor();
-        if (isLaserActive) {
-            laserTrail = [];
-            broadcastLaser(true);
-        }
         if (editor && !isDrawTab && !isMarkdown) editor.focus();
         if (isFocusMode) scheduleFocusDimmingUpdate();
         if (privacyInspectorModal && !privacyInspectorModal.classList.contains('hidden')) updatePrivacyInspector();
@@ -5213,7 +4948,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 tabsContentDirty = true;
                 dirtyTabIds.add(tid);
                 isTabOrderDirty = true;
-                await switchTab(tid);
+                switchTab(tid);
                 updateMultiPaneSelectors();
                 broadcastLocalSync({
                     type: 'tabs_structure',
@@ -5321,15 +5056,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             const activeTabForCursor = (isPane2Active && multiPaneTabs.pane2) ? multiPaneTabs.pane2 : activeTabId;
             const currentPos = activeEditorForCursor ? activeEditorForCursor.selectionStart || 0 : 0;
 
-            const isCurrentlyTyping = isTyping && (typingTabId === activeTabForCursor);
             const myCursorData = {
                 pos: currentPos,
                 name: myUsername,
                 avatar: myAvatarUrl,
                 tabId: activeTabForCursor,
                 timestamp: Date.now(),
-                pubKey: myPublicKeyJwk,
-                typing: isCurrentlyTyping
+                pubKey: myPublicKeyJwk
             };
 
             const isInitialSave = !lastSavedTabsJSON;
@@ -5338,7 +5071,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 updated_at: Date.now(),
                 last_writer: myDeviceId
             };
-            payload[`cursors.${myDeviceId}`] = myCursorData;
+            if (isInitialSave) {
+                payload.cursors = {
+                    [myDeviceId]: myCursorData
+                };
+            } else {
+                payload[`cursors.${myDeviceId}`] = myCursorData;
+            }
 
             broadcastLocalSync({
                 type: 'cursor_presence',
@@ -5427,7 +5166,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         try {
                             localStorage.setItem('quickpad_last_active_hash', fullHash);
                             updateRecentWorkspaces(fullHash);
-                            localStorage.setItem('quickpad_cached_tabs_' + currentToken, currentTabsJSON);
                         } catch(e) {}
                     }
                 } catch(netErr) {
@@ -5466,6 +5204,25 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             saveWorkspace();
         }
     }, 30000);
+
+    // --- Peer Colors & Cursor Engine ---
+    const PEER_COLORS = [
+        { color: '#00fff9', text: '#000' }, // Cyan
+        { color: '#00ff88', text: '#000' }, // Emerald
+        { color: '#ff007f', text: '#fff' }, // Hot Pink
+        { color: '#ffd600', text: '#000' }, // Gold
+        { color: '#a855f7', text: '#fff' }, // Purple
+        { color: '#ff6b35', text: '#fff' }, // Orange
+        { color: '#38bdf8', text: '#000' }  // Sky Blue
+    ];
+
+    function getPeerColor(peerId) {
+        let hash = 0;
+        const str = peerId || 'anon';
+        for (let i = 0; i < str.length; i++) hash = (hash << 5) - hash + str.charCodeAt(i);
+        const index = Math.abs(hash) % PEER_COLORS.length;
+        return PEER_COLORS[index];
+    }
 
     // --- Caret Position & Remote Cursors Engine ---
     function getCaretCoordinates(targetTextareaOrPos, maybePos) {
@@ -5602,23 +5359,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         cursor.style.left = coords.left + 'px';
         cursor.style.height = `${coords.height}px`;
         cursor.style.opacity = coords.visible ? '1' : '0';
-
-        // Smart dynamic repositioning for the collaborator name badge:
-        // 1. If near the top boundary (line 1 or coords.top < 26px), flip badge below the cursor line so it is never clipped by the header/top edge
-        if (coords.top < 26) {
-            cursor.classList.add('tag-below');
-        } else {
-            cursor.classList.remove('tag-below');
-        }
-
-        // 2. If near the right edge of the screen/container, flip badge to right-align so it never bleeds off-screen
-        const containerWidth = cursorsContainer.clientWidth || window.innerWidth;
-        const approxBadgeWidth = Math.max(45, (peerName.length * 8) + 16);
-        if (coords.left + approxBadgeWidth > containerWidth - 10) {
-            cursor.classList.add('tag-flip-x');
-        } else {
-            cursor.classList.remove('tag-flip-x');
-        }
     }
 
     function updateAllVisiblePeerCursors() {
@@ -5651,15 +5391,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         const activeTabForCursor = (isPane2Active && multiPaneTabs.pane2) ? multiPaneTabs.pane2 : activeTabId;
         const currentPos = activeEditorForCursor ? activeEditorForCursor.selectionStart || 0 : 0;
 
-        const isCurrentlyTyping = isTyping && (typingTabId === activeTabForCursor);
         const cursorData = {
             pos: currentPos,
             name: myUsername,
             avatar: myAvatarUrl,
             tabId: activeTabForCursor,
             timestamp: Date.now(),
-            pubKey: myPublicKeyJwk,
-            typing: isCurrentlyTyping
+            pubKey: myPublicKeyJwk
         };
         if (latestFlare && (Date.now() - latestFlare.timestamp < 3500)) {
             cursorData.flare = latestFlare;
@@ -5674,7 +5412,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 y: Math.round(localLaser.y),
                 color: getPeerColor(myDeviceId).color,
                 name: myUsername || 'Collaborator',
-                tabId: activeTabForCursor,
                 timestamp: Date.now()
             };
         }
@@ -5693,8 +5430,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         
         // Responsive throttling:
         // - Remote peers active: throttle cursor updates to once every 350ms for live tracking
-        // - Alone or background: heartbeat update every 2.5 seconds to keep presence fresh
-        const minInterval = hasRemotePeers ? 350 : 2500;
+        // - Alone in room: heartbeat update every 7 seconds to keep presence alive in document
+        const minInterval = hasRemotePeers ? 350 : 7000;
         const elapsed = now - lastFirestoreCursorSync;
 
         if (!forceCloud && elapsed < minInterval) {
@@ -5718,7 +5455,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         db.collection("workspaces").doc(currentToken).update(updatePayload).catch(err => {
             // Fallback to set with merge if document or field structure needs initialization
             if (currentToken && !isBurnMode) {
-                db.collection("workspaces").doc(currentToken).set(updatePayload, { merge: true }).catch(() => {});
+                db.collection("workspaces").doc(currentToken).set({
+                    cursors: {
+                        [myDeviceId]: cursorData
+                    }
+                }, { merge: true }).catch(() => {});
             }
         });
     }
@@ -5901,19 +5642,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     // --- Markdown & Split View Toggles ---
     if (mdToggleBtn) {
         mdToggleBtn.addEventListener('click', () => {
-            if (isSplitMode) {
-                if (typeof showToast === 'function') showToast("Markdown preview is active in Split View", "info", 2000);
-                return;
-            }
+            if (isSplitMode) return;
             isMarkdown = !isMarkdown;
             updateViewVisibility();
             if (isMarkdown) {
-                mdToggleBtn.innerHTML = `<span>✏️ Edit View</span><kbd>${isMacPlatform ? '⌥M' : 'Alt+M'}</kbd>`;
-                if (typeof showToast === 'function') showToast("👁️ Markdown Preview Active", "info", 1500);
+                mdToggleBtn.innerHTML = '<span>✏️ Edit View</span><kbd>Alt+M</kbd>';
             } else {
-                mdToggleBtn.innerHTML = `<span>👁️ Markdown Preview</span><kbd>${isMacPlatform ? '⌥M' : 'Alt+M'}</kbd>`;
+                mdToggleBtn.innerHTML = '<span>👁️ Markdown Preview</span><kbd>Alt+M</kbd>';
                 if (editor) editor.focus();
-                if (typeof showToast === 'function') showToast("✏️ Note Editor Active", "info", 1500);
             }
         });
     }
@@ -5922,19 +5658,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         splitToggleBtn.addEventListener('click', () => {
             isSplitMode = !isSplitMode;
             if (isSplitMode) {
-                splitToggleBtn.innerHTML = `<span>💻 Single View</span><kbd>${isMacPlatform ? '⌥S' : 'Alt+S'}</kbd>`;
+                splitToggleBtn.innerHTML = '<span>💻 Single View</span><kbd>Alt+S</kbd>';
                 if (mdToggleBtn) {
                     mdToggleBtn.style.opacity = '0.4';
                     mdToggleBtn.style.pointerEvents = 'none';
                 }
-                if (typeof showToast === 'function') showToast("🌗 Split View Active", "info", 1500);
             } else {
-                splitToggleBtn.innerHTML = `<span>🌗 Split View</span><kbd>${isMacPlatform ? '⌥S' : 'Alt+S'}</kbd>`;
+                splitToggleBtn.innerHTML = '<span>🌗 Split View</span><kbd>Alt+S</kbd>';
                 if (mdToggleBtn) {
                     mdToggleBtn.style.opacity = '1';
                     mdToggleBtn.style.pointerEvents = 'auto';
                 }
-                if (typeof showToast === 'function') showToast("💻 Single View Active", "info", 1500);
             }
             updateViewVisibility();
         });
@@ -6098,9 +5832,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             try {
                 localStorage.removeItem(`qp_cached_${currentToken}`);
                 localStorage.removeItem(`qp_active_tab_${currentToken}`);
-                localStorage.removeItem(`quickpad_cached_tabs_${currentToken}`);
-                localStorage.removeItem(`quickpad_active_tab_${currentToken}`);
-                localStorage.removeItem(`quickpad_tab_order_${currentToken}`);
                 localStorage.removeItem('quickpad_last_active_hash');
             } catch (e) {}
 
@@ -7278,20 +7009,15 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         if (!currentToken || isBurnMode || isReadOnly) return;
         const now = Date.now();
 
-        const isPane2Active = (multiNoteMode === 2 && document.activeElement === multiPane2Editor);
-        const activeTabForLaser = (isPane2Active && multiPaneTabs.pane2) ? multiPaneTabs.pane2 : activeTabId;
-
         const laserData = (isLaserActive && localLaser.visible && localLaser.inBounds && localLaser.x !== null) ? {
             active: true,
             x: Math.round(localLaser.x),
             y: Math.round(localLaser.y),
             color: getPeerColor(myDeviceId).color,
             name: myUsername || 'Collaborator',
-            tabId: activeTabForLaser,
             timestamp: now
         } : {
             active: false,
-            tabId: activeTabForLaser,
             timestamp: now
         };
 
@@ -7303,21 +7029,20 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         });
 
         if (!db || isCloudQuotaExceeded) return;
-        const hasRemotePeers = Object.keys(peerCursorsData).length > 0;
-        if (!hasRemotePeers) return; // Zero Firestore writes if alone in room
-        const laserInterval = 120; // 8.3 updates/sec with 60fps interpolation yields silky-smooth cross-device motion
-        if (!immediate && now - lastLaserBroadcast < laserInterval) {
+        if (!immediate && now - lastLaserBroadcast < 3000) {
             if (!laserSyncTimeout) {
                 laserSyncTimeout = setTimeout(() => {
                     laserSyncTimeout = null;
                     broadcastLaser(true);
-                }, laserInterval - (now - lastLaserBroadcast));
+                }, 3000 - (now - lastLaserBroadcast));
             }
             return;
         }
         lastLaserBroadcast = now;
         clearTimeout(laserSyncTimeout);
         laserSyncTimeout = null;
+
+        if (Object.keys(peerCursorsData).length === 0) return;
 
         const updatePayload = {};
         updatePayload[`cursors.${myDeviceId}.laser`] = laserData;
@@ -7378,29 +7103,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 for (let cid in remoteLasers) {
                     const rLaser = remoteLasers[cid];
                     if (rLaser && rLaser.active && (now - rLaser.lastUpdate < 8000)) {
-                        // Tab isolation check: Only render remote laser if receiver is viewing the note tab where laser is active
-                        const laserTabId = rLaser.tabId || (peerCursorsData[cid] ? peerCursorsData[cid].tabId : 'main');
-                        const isVisibleInPane1 = (laserTabId === activeTabId);
-                        const isVisibleInPane2 = (multiNoteMode === 2 && multiPaneTabs.pane2 === laserTabId);
-                        if (!isVisibleInPane1 && !isVisibleInPane2) {
-                            continue;
-                        }
-
                         // Smooth position interpolation
-                        const prevX = rLaser.x;
-                        const prevY = rLaser.y;
                         rLaser.x += (rLaser.targetX - rLaser.x) * 0.35;
                         rLaser.y += (rLaser.targetY - rLaser.y) * 0.35;
-
-                        // Continuously build smooth trail ribbon along interpolation trajectory
-                        if (!rLaser.trail) rLaser.trail = [];
-                        if (Math.hypot(rLaser.x - prevX, rLaser.y - prevY) > 1.2) {
-                            const lastPt = rLaser.trail[rLaser.trail.length - 1];
-                            if (!lastPt || Math.hypot(rLaser.x - lastPt.x, rLaser.y - lastPt.y) > 2) {
-                                rLaser.trail.push({ x: rLaser.x, y: rLaser.y, time: now });
-                                if (rLaser.trail.length > 35) rLaser.trail.shift();
-                            }
-                        }
 
                         // Prune & draw remote trail
                         if (rLaser.trail && rLaser.trail.length > 0) {
@@ -8783,16 +8488,15 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         { name: "Upload Profile Avatar Photo", shortcut: "Photo", action: () => { if (profilePillBtn) profilePillBtn.click(); setTimeout(() => profileAvatarFileInput && profileAvatarFileInput.click(), 200); } },
         { name: "Insert Image from Device...", shortcut: "Image", action: () => noteImageFileInput && noteImageFileInput.click() },
         { name: "Find & Replace", shortcut: "⌘F", action: () => toggleFindBar() },
-        { name: "Toggle Markdown Preview", shortcut: isMacPlatform ? "⌥M" : "Alt+M", action: () => mdToggleBtn && mdToggleBtn.click() },
-        { name: "Toggle Split View", shortcut: isMacPlatform ? "⌥S" : "Alt+S", action: () => splitToggleBtn && splitToggleBtn.click() },
-        { name: "Multi-Note View: 2 Notes Side-by-Side", shortcut: isMacPlatform ? "⌥2" : "Alt+2", action: () => setMultiNoteLayout(multiNoteMode === 2 ? 1 : 2) },
-        { name: "Single Note View (Close Split Panes)", shortcut: isMacPlatform ? "⌥1" : "Alt+1", action: () => setMultiNoteLayout(1) },
-        { name: "Create New Note Tab", shortcut: isMacPlatform ? "⌥N" : "Alt+N", action: () => addTabBtn && addTabBtn.click() },
-        { name: "Toggle Zen Mode", shortcut: isMacPlatform ? "⌥Z" : "Alt+Z", action: () => zenBtn && zenBtn.click() },
-        { name: "Toggle Typewriter Scroll", shortcut: isMacPlatform ? "⌥T" : "Alt+T", action: () => toggleTypewriterMode() },
-        { name: "Toggle Focus Dimming", shortcut: isMacPlatform ? "⌥H" : "Alt+H", action: () => toggleFocusMode() },
-        { name: "Toggle Presenter Spotlight", shortcut: isMacPlatform ? "⌥O" : "Alt+O", action: () => togglePresenterSpotlight() },
-        { name: "Toggle Collaborator Laser", shortcut: isMacPlatform ? "⌥L" : "Alt+L", action: () => toggleLaserPointer() },
+        { name: "Toggle Markdown Preview", shortcut: "Alt+M", action: () => mdToggleBtn && mdToggleBtn.click() },
+        { name: "Toggle Split View", shortcut: "Alt+S", action: () => splitToggleBtn && splitToggleBtn.click() },
+        { name: "Multi-Note View: 2 Notes Side-by-Side", shortcut: "Alt+2", action: () => setMultiNoteLayout(multiNoteMode === 2 ? 1 : 2) },
+        { name: "Single Note View (Close Split Panes)", shortcut: "Alt+1", action: () => setMultiNoteLayout(1) },
+        { name: "Toggle Zen Mode", shortcut: "Alt+Z", action: () => zenBtn && zenBtn.click() },
+        { name: "Toggle Typewriter Scroll", shortcut: "Alt+T", action: () => toggleTypewriterMode() },
+        { name: "Toggle Focus Dimming", shortcut: "Alt+H", action: () => toggleFocusMode() },
+        { name: "Toggle Presenter Spotlight", shortcut: "Alt+O", action: () => togglePresenterSpotlight() },
+        { name: "Toggle Collaborator Laser", shortcut: "Alt+L", action: () => toggleLaserPointer() },
         { name: "Live Sandboxed Code Runner", shortcut: "⌘Enter", action: () => toggleCodeRunner(true) },
         { name: "Ghost Image Steganography", shortcut: "Steg", action: () => stegOpenBtn && stegOpenBtn.click() },
         { name: "P2P Wormhole File Beam", shortcut: "Beam", action: () => wormholeOpenBtn && wormholeOpenBtn.click() },
@@ -8904,7 +8608,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
     function handleGlobalShortcuts(e) {
         const activeEl = document.activeElement;
-        const isModalInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && activeEl !== editor && activeEl !== multiPane2Editor;
+        const isModalInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && activeEl !== editor;
 
         // 1. Escape Key Handler (Dismiss modals, overlays, or double-tap Panic)
         if (isKeyMatch(e, 'Escape', 'Escape', null, 27)) {
@@ -9014,48 +8718,29 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             return;
         }
 
-        // 6. Markdown View Toggle: Option+M (⌥M) / Cmd+M (⌘M) / Cmd+Option+M (⌘⌥M) / Cmd+Shift+M (⌘⇧M) / Alt+M / Ctrl+M
+        // 6. Markdown View Toggle: Alt+M / Option+M / Ctrl+M / Cmd+Shift+M / Ctrl+Shift+M
         const isM = isKeyMatch(e, 'KeyM', 'm', 'µ', 77);
         const isMarkdownShortcut = (e.altKey && isM) ||
-                                   (e.metaKey && isM) ||
-                                   (e.ctrlKey && isM);
+                                   (e.ctrlKey && !e.metaKey && !e.shiftKey && isM) ||
+                                   ((e.metaKey || e.ctrlKey) && e.shiftKey && isM);
         if (isMarkdownShortcut) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
             closeAllDropdowns();
-            if (multiNoteMode === 2 && document.activeElement === multiPane2Editor) {
-                toggleMultiPanePreview(2);
-            } else if (mdToggleBtn) {
-                mdToggleBtn.click();
-            }
+            if (mdToggleBtn) mdToggleBtn.click();
             return;
         }
 
-        // 7. Split View Toggle: Option+S (⌥S) / Cmd+Option+S (⌘⌥S) / Cmd+Shift+S (⌘⇧S) / Alt+S
+        // 7. Split View Toggle: Alt+S / Option+S / Cmd+Shift+S / Ctrl+Shift+S
         const isSplitShortcut = (e.altKey && isS) ||
-                                ((e.metaKey || e.ctrlKey) && e.shiftKey && isS) ||
-                                (e.metaKey && e.altKey && isS);
+                                ((e.metaKey || e.ctrlKey) && e.shiftKey && isS);
         if (isSplitShortcut) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
             closeAllDropdowns();
             if (splitToggleBtn) splitToggleBtn.click();
-            return;
-        }
-
-        // 8. New Tab: Option+N (⌥N) / Cmd+Option+N (⌘⌥N) / Cmd+Shift+N (⌘⇧N) / Alt+N
-        const isN = isKeyMatch(e, 'KeyN', 'n', '˜', 78);
-        const isNewTabShortcut = (e.altKey && isN) ||
-                                 ((e.metaKey || e.ctrlKey) && e.shiftKey && isN) ||
-                                 (e.metaKey && e.altKey && isN);
-        if (isNewTabShortcut) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            closeAllDropdowns();
-            if (addTabBtn) addTabBtn.click();
             return;
         }
 

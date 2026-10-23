@@ -1,4 +1,4 @@
-# QuickPad ⚡ (v4.5 Pro — Zero-Knowledge Real-Time Scratchpad)
+# QuickPad ⚡ (v4.4 Pro — Zero-Knowledge Real-Time Scratchpad)
 
 QuickPad is a hyper-fast, serverless, real-time scratchpad engineered for absolute privacy and frictionless productivity. Designed to eliminate the bloat of modern note-taking: **no logins, no accounts, no tracking cookies, and no data harvesting**. You open the link, type, sketch, format, and collaborate.
 
@@ -8,17 +8,7 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 ---
 
-## ✨ What's New in Version 4.5 Pro
-
-- 🍎 **Native macOS Quick Keys & Shortcut Overhaul:** Deep support for Mac keyboard ergonomics (`⌥ Option + M`, `⌘ Cmd + M`, `⌥ Option + S`, `⌥ Option + 2`, `⌥ Option + N`) with dynamic Mac UI badges (`⌥` / `⌘`), window-minimize protection, and interactive toast confirmations.
-- 👥 **Real-Time Isolated Multi-Pane Tab Sync:** Tabs created, deleted, or synchronized remotely update secondary split-note dropdown menus immediately without closing and reopening Pane 2.
-- 🎯 **Tab-Isolated Laser Pointers & Collaborative Presence:** Multi-user laser pointers and visual presence are now strictly isolated to their active note tab, preventing cross-tab pointer pollution during multi-note collaboration.
-- 📱 **Responsive Header & User Typing Indicators:** Collaborator typing badges and headers responsively adapt to compact and shrunk screens without truncating user names.
-- ⚡ **Auto-Purging PWA Cache Engine (v110):** Proactive client-side cache cleaner and instant controller reload for seamless PWA updates.
-
----
-
-## 🚀 Version 4.4 Pro Features
+## ✨ What's New in Version 4.4 Pro
 
 - 🔥 **Overhauled Self-Destruct Burn Notes:** Create one-time encrypted burn links with dedicated copy dialogs. True zero-knowledge client-side decryption key in URL hash (`#key`), safe server-side wiping upon first open, and your active workspace stays alive and unharmed.
 - ⚡ **Seamless Splash Screen & Fast Launch:** Eliminates double-loading with session caching and seamless background PWA updates.
