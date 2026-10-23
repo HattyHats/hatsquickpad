@@ -20,7 +20,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=97">
+    <link rel="stylesheet" href="style.css?v=110">
     
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -153,7 +153,7 @@
             <div id="privacy-inspector-btn" class="brand-badge" role="button" tabindex="0" title="QuickPad Zero-Knowledge Workspace • Click for Privacy Inspector">
                 <span class="brand-icon">⚡</span>
                 <span class="brand-title">QUICKPAD</span>
-                <span class="brand-ver-tag">v4.4</span>
+                <span class="brand-ver-tag">v4.5</span>
                 <span class="brand-shield" title="E2EE AES-256 Active • Zero-Knowledge Privacy Inspector">🛡️</span>
             </div>
 
@@ -162,6 +162,9 @@
                 <div id="tabs-container"></div>
                 <button id="add-tab-btn" class="header-icon-btn" title="Add New Tab (Ctrl+T)">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <button id="split-notes-btn" class="header-icon-btn" title="2 Notes Side-by-Side (Alt+2)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line></svg>
                 </button>
             </div>
         </div>
@@ -254,6 +257,10 @@
                     <button id="split-toggle-btn" class="menu-action-btn">
                         <span>🌗 Split View</span>
                         <kbd>Alt+S</kbd>
+                    </button>
+                    <button id="multi-note-2-btn" class="menu-action-btn">
+                        <span>◫ 2 Notes Side-by-Side</span>
+                        <kbd>Alt+2</kbd>
                     </button>
                     <button id="zen-btn" class="menu-action-btn">
                         <span>🧘 Zen Mode</span>
@@ -464,6 +471,36 @@
                     <button id="locked-tab-unlock-btn" class="btn primary-action">Unlock Tab</button>
                 </div>
                 <div id="locked-tab-error" class="locked-tab-error hidden">Incorrect password. Please try again.</div>
+            </div>
+        </div>
+
+        <!-- Pane 1 Header Strip (Active when Multi-Note View is active) -->
+        <div id="multi-pane-1-header" class="multi-pane-header">
+            <span class="multi-pane-title-badge">
+                <span>📝</span>
+                <span id="multi-pane-1-title">Pane 1: main.txt</span>
+            </span>
+            <div class="multi-pane-actions">
+                <button class="multi-pane-btn" id="multi-pane-1-single-btn" title="Return to Single Note View (Alt+1)">1 Note</button>
+            </div>
+        </div>
+
+        <!-- Multi-Note Pane 2 (Secondary Note) -->
+        <div id="multi-pane-2" class="multi-pane">
+            <div class="multi-pane-header">
+                <span class="multi-pane-title-badge">
+                    <span>📑</span>
+                    <span>Pane 2:</span>
+                    <select id="multi-pane-2-select" class="multi-pane-tab-select" title="Choose note to display in Pane 2"></select>
+                </span>
+                <div class="multi-pane-actions">
+                    <button class="multi-pane-btn" id="multi-pane-2-md-btn" title="Toggle Markdown Preview">👁️ Preview</button>
+                    <button class="multi-pane-btn close-pane" id="multi-pane-2-close-btn" title="Close Split Pane">✕</button>
+                </div>
+            </div>
+            <div class="multi-pane-body">
+                <textarea id="multi-pane-2-editor" class="multi-pane-editor" placeholder="Start typing in secondary note..."></textarea>
+                <div id="multi-pane-2-preview" class="multi-pane-preview markdown-body hidden"></div>
             </div>
         </div>
     </main>
@@ -691,9 +728,9 @@
         <div class="modal-content modal-standard info-modal-content">
             <span id="close-info" class="close-btn">&times;</span>
             <div class="text-center" style="margin-bottom: 20px;">
-                <div class="splash-badge" style="display:inline-block;margin-bottom:8px;">VERSION 4.4 PRO</div>
+                <div class="splash-badge" style="display:inline-block;margin-bottom:8px;">VERSION 4.5 PRO</div>
                 <h2 class="neon-text" style="font-size: 1.8rem; margin-bottom: 4px;">Quick-Pad</h2>
-                <p style="color: var(--primary-color); font-family: monospace; font-size: 0.85rem;">Zero-Knowledge Real-Time Scratchpad • v4.4 Pro</p>
+                <p style="color: var(--primary-color); font-family: monospace; font-size: 0.85rem;">Zero-Knowledge Real-Time Scratchpad • v4.5 Pro</p>
             </div>
             
             <p class="info-intro">QuickPad is a hyper-fast, serverless scratchpad that syncs instantly across your devices. Engineered for pure speed and absolute privacy: <strong>no accounts, no trackers, and no server-side plaintext storage</strong>. Open the link, type, and share.</p>
@@ -1338,16 +1375,46 @@
         <button id="panic-exit-btn" class="panic-exit-btn" title="Click or press Alt+P to return to QuickPad">QuickPad Active (Click to return)</button>
     </div>
 
+    <!-- Tab Custom Context Menu -->
+    <div id="tab-context-menu" class="tab-context-menu hidden">
+        <button id="tab-ctx-split" type="button"><span>◫</span> <span>Open Side-by-Side</span></button>
+        <div class="menu-divider"></div>
+        <button id="tab-ctx-move-left" type="button"><span>⬅️</span> <span>Move Tab Left</span></button>
+        <button id="tab-ctx-move-right" type="button"><span>➡️</span> <span>Move Tab Right</span></button>
+        <div class="menu-divider"></div>
+        <button id="tab-ctx-rename" type="button"><span>✏️</span> <span>Rename Tab</span></button>
+        <button id="tab-ctx-lock" type="button"><span>🔒</span> <span>Lock / Unlock Tab</span></button>
+        <div class="menu-divider"></div>
+        <button id="tab-ctx-delete" type="button" class="danger"><span>🗑️</span> <span>Delete Tab</span></button>
+    </div>
+
     <!-- Toast Notifications Container -->
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Application Script (Standard Script for Universal file:// & HTTPS Compatibility) -->
-    <script src="app.js?v=97"></script>
+    <script src="app.js?v=110"></script>
     <script>
+        // Auto-delete any legacy Service Worker caches immediately
+        if (typeof window !== 'undefined' && 'caches' in window) {
+            caches.keys().then((names) => {
+                names.forEach((name) => {
+                    if (name !== 'quickpad-v110') {
+                        caches.delete(name);
+                    }
+                });
+            });
+        }
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (!window.__sw_reloaded) {
+                    window.__sw_reloaded = true;
+                    window.location.reload();
+                }
+            });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
+                navigator.serviceWorker.register('./sw.js?v=110')
                     .then((reg) => {
+                        if (typeof reg.update === 'function') reg.update();
                         console.log('QuickPad SW active.');
                     })
                     .catch(err => console.warn('SW registration warning:', err));
