@@ -1,4 +1,4 @@
-# QuickPad ⚡ (v4.4 Pro — Zero-Knowledge Real-Time Scratchpad)
+# QuickPad ⚡ (v4.3 Pro — Zero-Knowledge Real-Time Scratchpad)
 
 QuickPad is a hyper-fast, serverless, real-time scratchpad engineered for absolute privacy and frictionless productivity. Designed to eliminate the bloat of modern note-taking: **no logins, no accounts, no tracking cookies, and no data harvesting**. You open the link, type, sketch, format, and collaborate.
 
@@ -8,14 +8,12 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 ---
 
-## ✨ What's New in Version 4.4 Pro
+## ✨ What's New in Version 4.3 Pro
 
-- 🔥 **Overhauled Self-Destruct Burn Notes:** Create one-time encrypted burn links with dedicated copy dialogs. True zero-knowledge client-side decryption key in URL hash (`#key`), safe server-side wiping upon first open, and your active workspace stays alive and unharmed.
-- ⚡ **Seamless Splash Screen & Fast Launch:** Eliminates double-loading with session caching and seamless background PWA updates.
-- 🛡️ **Brand Badge Privacy Inspector:** Clean header integration placing the zero-knowledge security shield directly next to the QuickPad brand name, saving maximum horizontal space for tabs.
 - 📄 **Multi-Format Document Upload & Editing:** Directly open, parse, and edit Microsoft Word (`.docx`), PDF documents (`.pdf`), Rich Text (`.rtf`), Markdown (`.md`), Code files, and plain text. Drag and drop any document straight into your workspace.
 - 🔄 **Chrome App & PWA Session Persistence:** Opening QuickPad from your desktop, dock, or Chrome Apps automatically resumes your active note right where you left off.
 - 🚀 **Clean Canvas Start & On-Demand Example Guide:** Fresh workspaces start completely clean and distraction-free. Load the interactive feature guide anytime via Settings, File menu, About dialog, or Command Palette (`⌘K`).
+- ⚡ **Snappy Fast Launch:** Splash screen transition sped up by over 60% for lightning-fast loads.
 - 🛡️ **100% Free, Private & Ad-Free:** Zero paywalls, zero accounts, zero tracking cookies, and zero ad networks. Pure, untracked productivity.
 
 ---
