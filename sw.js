@@ -1,10 +1,11 @@
-const CACHE_NAME = 'quickpad-v113';
+const CACHE_NAME = 'quickpad-v117';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
-  './icon.png'
+  './icon.png',
+  './manifest.json'
 ];
 
 self.addEventListener('install', (event) => {
@@ -37,8 +38,8 @@ self.addEventListener('fetch', (event) => {
   // Let external APIs and database endpoints pass directly to the network
   const url = event.request.url;
   if (url.includes('firestore.googleapis.com') || 
+      url.includes('identitytoolkit.googleapis.com') ||
       url.includes('firebaseio.com') ||
-      url.includes('googleapis.com') ||
       url.includes('api.qrserver.com')) {
     return;
   }
@@ -55,8 +56,14 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => {
-        // If network fails (offline), fall back to the cache
-        return caches.match(event.request, { ignoreSearch: true });
+        // If network fails (offline), fall back to the cache or a valid offline Response
+        return caches.match(event.request, { ignoreSearch: true }).then((cached) => {
+          if (cached) return cached;
+          if (event.request.mode === 'navigate') {
+            return caches.match('./index.html', { ignoreSearch: true });
+          }
+          return new Response('', { status: 503, statusText: 'Offline' });
+        });
       })
   );
 });

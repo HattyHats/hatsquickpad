@@ -1,4 +1,4 @@
-# QuickPad ⚡ (v4.5 Pro — Zero-Knowledge Real-Time Scratchpad)
+# QuickPad ⚡ (v4.6 Pro — Zero-Knowledge Real-Time Scratchpad)
 
 QuickPad is a hyper-fast, serverless, real-time scratchpad engineered for absolute privacy and frictionless productivity. Designed to eliminate the bloat of modern note-taking: **no logins, no accounts, no tracking cookies, and no data harvesting**. You open the link, type, sketch, format, and collaborate.
 
@@ -8,13 +8,15 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 ---
 
-## ✨ What's New in Version 4.5 Pro
+## ✨ What's New in Version 4.6 Pro
 
+- 📑 **Multi-Tab Navigation Suite (`‹` / `›` Arrows, Drag-to-Scroll & `📑 All Notes` Dropdown):** Effortlessly manage dozens of note tabs with automatic `‹` and `›` scroll buttons, smooth click-and-drag horizontal tab sliding, mouse-wheel scrolling, and an interactive **`📑 All Notes`** quick-switcher dropdown with one-click side-by-side (`◫`) Pane 2 opening.
+- ⚡ **Cipher Decryption Wave on Tab Switch:** Switching between notes in either Pane 1 or Pane 2 plays a smooth, real-time cyber-glyph decryption wave without interrupting background auto-saves or HUD word/character metrics.
+- 📐 **Zero-Cutoff Responsive Header & 2-Pane Controls:** Pinned `+` New Tab, `◫` 2-Note Split View, and `📑 All Notes` controls stay 100% visible and clickable alongside the top action menu across all window sizes and tab counts.
 - 🍎 **Native macOS Quick Keys & Shortcut Overhaul:** Deep support for Mac keyboard ergonomics (`⌥ Option + M`, `⌘ Cmd + M`, `⌥ Option + S`, `⌥ Option + 2`, `⌥ Option + N`) with dynamic Mac UI badges (`⌥` / `⌘`), window-minimize protection, and interactive toast confirmations.
 - 👥 **Real-Time Isolated Multi-Pane Tab Sync:** Tabs created, deleted, or synchronized remotely update secondary split-note dropdown menus immediately without closing and reopening Pane 2.
-- 🎯 **Tab-Isolated Laser Pointers & Collaborative Presence:** Multi-user laser pointers and visual presence are now strictly isolated to their active note tab, preventing cross-tab pointer pollution during multi-note collaboration.
-- 📱 **Responsive Header & User Typing Indicators:** Collaborator typing badges and headers responsively adapt to compact and shrunk screens without truncating user names.
-- ⚡ **Auto-Purging PWA Cache Engine (v113):** Proactive client-side cache cleaner and instant controller reload for seamless PWA updates.
+- 🎯 **Tab-Isolated Laser Pointers & Collaborative Presence:** Multi-user laser pointers and visual presence are strictly isolated to their active note tab, preventing cross-tab pointer pollution during multi-note collaboration.
+- ⚡ **Auto-Purging PWA Cache Engine (v117):** Proactive client-side cache cleaner and instant controller reload for seamless PWA updates.
 
 ---
 
@@ -105,7 +107,7 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 - 🖥️ **Adaptive Multi-Stage Desktop Responsiveness:** Automatically collapses top menu buttons into sleek glass icon buttons and streamlines the bottom HUD into an ultra-clean 28px status bar with an interactive `⚡ Tools` dropup menu, ensuring tabs and notes have maximum breathing room with zero overflow.
 - 📲 **Fluid Horizontal Drag & Touch Navigation:** Both the top header menu/tabs and bottom Live HUD feature smooth drag-and-swipe horizontal scrolling with hidden scrollbars, optimized for smartphones, tablets, and desktops alike.
-- 📴 **Progressive Web App (PWA v45):** Full offline caching with Service Worker v45, background sync resilience, and installability to home screens on iOS, Android, macOS, and Windows.
+- 📴 **Progressive Web App (PWA v117):** Full offline caching with Service Worker v117, background sync resilience, and installability to home screens on iOS, Android, macOS, and Windows.
 - 🌗 **Split View & Markdown:** Side-by-side live Markdown preview with automated syntax highlighting via Highlight.js and interactive task list checkboxes.
 - 🔤 **Typography Controls:** Switch between Monospace (`Fira Code`), Sans-Serif (`Inter`), and Serif (`Lora`) typography with instant font size scaling (`A-` / `A+`).
 - 🎨 **Custom Themes & Screensaver:** 6 cyber neon themes, custom hex background picker, and customizable idle Matrix screensaver.

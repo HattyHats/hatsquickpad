@@ -17,6 +17,7 @@
     --primary-shadow: rgba(0, 255, 249, 0.4);
     --primary-rgb: 0, 255, 249;
     --header-height: 56px;
+    --hud-height: 48px;
 }
 
 body.theme-matrix {
@@ -160,9 +161,8 @@ body, html {
 #tabs-bar {
     display: flex;
     align-items: center;
-    gap: 6px;
-    overflow-x: auto;
-    scrollbar-width: none;
+    gap: 4px;
+    overflow: hidden;
     padding: 2px 0;
     min-width: 0;
     flex: 1 1 auto;
@@ -173,7 +173,190 @@ body, html {
     display: flex;
     align-items: center;
     gap: 5px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--primary-rgb), 0.35) transparent;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    padding: 2px 1px;
+    scroll-behavior: smooth;
+}
+#tabs-container.is-dragging-scroll {
+    scroll-behavior: auto;
+    cursor: grabbing !important;
+}
+#tabs-container.is-dragging-scroll .tab {
+    cursor: grabbing !important;
+}
+#tabs-container::-webkit-scrollbar {
+    height: 3px;
+}
+#tabs-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+#tabs-container::-webkit-scrollbar-thumb {
+    background: rgba(var(--primary-rgb), 0.35);
+    border-radius: 3px;
+}
+#tabs-container:hover::-webkit-scrollbar-thumb {
+    background: rgba(var(--primary-rgb), 0.75);
+}
+
+/* Tab Bar Left / Right Scroll Arrows */
+.tab-scroll-btn {
+    background: rgba(var(--primary-rgb), 0.08);
+    border: 1px solid rgba(var(--primary-rgb), 0.3);
+    border-radius: 6px;
+    color: var(--primary-color);
+    cursor: pointer;
+    width: 20px;
+    height: 26px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
     flex-shrink: 0;
+    user-select: none;
+    transition: all 0.18s ease;
+}
+.tab-scroll-btn:hover:not(.at-edge) {
+    background: rgba(var(--primary-rgb), 0.22);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 8px var(--primary-shadow);
+    color: #fff;
+}
+.tab-scroll-btn.at-edge {
+    opacity: 0.3;
+    cursor: default;
+    border-color: var(--border-color);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* All Note Tabs Quick-Switcher Dropdown */
+.all-tabs-dropdown-group {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+}
+.all-tabs-btn {
+    width: auto !important;
+    min-width: 34px;
+    padding: 0 6px;
+    gap: 3px;
+    font-size: 0.74rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+}
+.all-tabs-icon {
+    font-size: 0.76rem;
+    line-height: 1;
+}
+.all-tabs-caret {
+    font-size: 0.62rem;
+    opacity: 0.85;
+    line-height: 1;
+}
+.all-tabs-menu {
+    min-width: 250px;
+    max-width: 320px;
+    padding: 6px;
+}
+.all-tabs-list {
+    max-height: 310px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-right: 2px;
+}
+.all-tabs-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    color: var(--text-color);
+    font-size: 0.80rem;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.all-tabs-item:hover {
+    background: rgba(var(--primary-rgb), 0.12);
+    border-color: rgba(var(--primary-rgb), 0.35);
+    color: #fff;
+}
+.all-tabs-item.active {
+    background: rgba(var(--primary-rgb), 0.18);
+    border-color: var(--primary-color);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(var(--primary-rgb), 0.15);
+}
+.all-tabs-item-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+.all-tabs-item-idx {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+.all-tabs-item.active .all-tabs-item-idx {
+    background: var(--primary-color);
+    color: #000;
+    font-weight: 800;
+}
+.all-tabs-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.all-tabs-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.all-tabs-mini-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    border-radius: 4px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.all-tabs-mini-btn:hover {
+    background: rgba(var(--primary-rgb), 0.22);
+    border-color: var(--primary-color);
+    color: #fff;
+}
+.all-tabs-mini-btn.delete:hover {
+    background: rgba(255, 77, 109, 0.22);
+    border-color: #ff4d6d;
+    color: #ff4d6d;
 }
 
 .tab {
@@ -192,6 +375,7 @@ body, html {
     gap: 5px;
     max-width: 145px;
     min-width: 45px;
+    flex-shrink: 0;
     overflow: hidden;
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -385,6 +569,18 @@ body, html {
     background: rgba(var(--primary-rgb), 0.15);
     border-color: var(--primary-color);
     box-shadow: 0 0 8px var(--primary-shadow);
+}
+.header-icon-btn.active {
+    background: rgba(var(--primary-rgb), 0.22);
+    border-color: var(--primary-color);
+    color: #fff;
+    box-shadow: 0 0 10px var(--primary-shadow);
+}
+
+/* Cipher Decryption Active Text Glow */
+#editor.cipher-decrypting,
+.multi-pane-editor.cipher-decrypting {
+    text-shadow: 0 0 8px rgba(var(--primary-rgb), 0.45);
 }
 
 /* Profile and Presence styling */
@@ -2734,6 +2930,13 @@ body.zen-mode #zen-exit-btn { display: block; }
 
 /* Stage 1: Medium / Shrunk Desktop Windows (<= 1280px) */
 @media (max-width: 1280px) {
+    #app-header {
+        padding: 0 10px;
+        gap: 8px;
+    }
+    .header-left-section {
+        gap: 8px;
+    }
     /* Collapse secondary action-bar buttons to sleek icon buttons */
     .action-bar .btn:not(.share-btn):not(.btn-new-pad) .btn-text {
         display: none;
@@ -2759,8 +2962,8 @@ body.zen-mode #zen-exit-btn { display: block; }
     }
 }
 
-/* Stage 2: Half-Screen Split / Narrow Windows (<= 920px) */
-@media (max-width: 920px) {
+/* Stage 2: Half-Screen Split / Narrow Windows (<= 980px) */
+@media (max-width: 980px) {
     /* Compact brand badge: hide QUICKPAD text, keep lightning icon and version */
     .brand-title {
         display: none;
@@ -2776,9 +2979,13 @@ body.zen-mode #zen-exit-btn { display: block; }
         display: none;
     }
     .action-bar .btn {
-        padding: 5px 7px;
-        min-width: 30px;
+        padding: 4px 6px;
+        min-width: 28px;
         justify-content: center;
+    }
+    .tab {
+        max-width: 120px;
+        padding: 3px 5px 3px 8px;
     }
 
     /* Streamline bottom HUD for split view */
@@ -2804,36 +3011,59 @@ body.zen-mode #zen-exit-btn { display: block; }
     #app-header {
         flex-direction: row;
         height: var(--header-height);
-        padding: 0 8px;
-        gap: 5px;
-        overflow-x: auto;
-        overflow-y: hidden;
+        padding: 0 6px;
+        gap: 4px;
+        overflow: hidden;
         flex-wrap: nowrap;
-        -webkit-overflow-scrolling: touch;
-        touch-action: pan-x;
-        scrollbar-width: none;
-    }
-    #app-header::-webkit-scrollbar {
-        display: none;
     }
     .brand-ver-tag,
     .sec-dot {
         display: none;
     }
+    .brand-badge {
+        padding: 3px 5px;
+        gap: 2px;
+    }
     .header-left-section {
-        max-width: none;
-        flex-shrink: 0;
-        gap: 5px;
+        flex: 1 1 auto;
+        min-width: 0;
+        gap: 4px;
+        overflow: hidden;
+    }
+    #tabs-bar {
+        gap: 4px;
+    }
+    .tab {
+        max-width: 105px;
+        font-size: 0.75rem;
+        padding: 3px 5px 3px 7px;
+    }
+    .header-icon-btn {
+        width: 24px;
+        height: 24px;
+    }
+    .tab-scroll-btn {
+        width: 18px;
+        height: 24px;
+        font-size: 0.9rem;
+    }
+    .all-tabs-icon {
+        display: none;
+    }
+    .all-tabs-btn {
+        min-width: 26px;
+        padding: 0 4px;
+        font-size: 0.7rem;
     }
     .action-bar {
         flex-shrink: 0;
-        gap: 3px;
+        gap: 2px;
         overflow-x: visible;
     }
     .action-bar .btn { 
-        padding: 4px 6px; 
-        font-size: 0.76rem; 
-        min-width: 28px;
+        padding: 4px 5px; 
+        font-size: 0.74rem; 
+        min-width: 25px;
         gap: 2px;
     }
     #editor, #preview, #editor-mirror { 

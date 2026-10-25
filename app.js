@@ -1,4 +1,4 @@
-// QuickPad v4.5 - Universal Client Script
+// QuickPad v4.6 - Universal Client Script
 (function() {
     'use strict';
 
@@ -175,6 +175,13 @@
     // --- Tabs & HUD Elements ---
     const tabsBar = document.getElementById('tabs-bar');
     const tabsContainer = document.getElementById('tabs-container');
+    const tabsScrollLeftBtn = document.getElementById('tabs-scroll-left-btn');
+    const tabsScrollRightBtn = document.getElementById('tabs-scroll-right-btn');
+    const allTabsDropdownGroup = document.getElementById('all-tabs-dropdown-group');
+    const allTabsBtn = document.getElementById('all-tabs-btn');
+    const allTabsCount = document.getElementById('all-tabs-count');
+    const allTabsMenuSubtitle = document.getElementById('all-tabs-menu-subtitle');
+    const allTabsList = document.getElementById('all-tabs-list');
     const addTabBtn = document.getElementById('add-tab-btn');
     const splitNotesBtn = document.getElementById('split-notes-btn');
     const multiNote2Btn = document.getElementById('multi-note-2-btn');
@@ -314,6 +321,7 @@
     const stegHidePass = document.getElementById('steg-hide-pass');
     const stegEncodeBtn = document.getElementById('steg-encode-btn');
     const stegRevealDropzone = document.getElementById('steg-reveal-dropzone');
+    const stegRevealPrompt = document.getElementById('steg-reveal-prompt');
     const stegRevealPreview = document.getElementById('steg-reveal-preview');
     const stegRevealFile = document.getElementById('steg-reveal-file');
     const stegRevealPass = document.getElementById('steg-reveal-pass');
@@ -416,6 +424,7 @@
     let countdownInterval = null;
     let isTyping = false;
     let typingTabId = null;
+    let typingResetTimeout = null;
     const dirtyTabIds = new Set();
     let isTabOrderDirty = false;
 
@@ -566,6 +575,7 @@
     let slashActive = false;
     let slashQuery = '';
     let slashCaretPos = 0;
+    let slashStartIndex = -1;
 
     // Mechanical Audio & Sensory State
     let audioFxProfile = localStorage.getItem('quickpad_audio_fx') || 'off';
@@ -587,6 +597,9 @@
     let wbSize = 4;
     let wbTool = 'pen';
     let wbHistory = [];
+    let strokeBatch = [];
+    let strokeBatchTimeout = null;
+    let strokesUnsubscribe = null;
 
     // WebRTC Voice Walkie-Talkie State
     let localAudioStream = null;
@@ -600,8 +613,8 @@
     let myUsername = localStorage.getItem('quickpad_username') || 'Anon';
     let myAvatarUrl = localStorage.getItem('quickpad_avatar') || '';
 
-    // v4.5 Pro Welcome Template
-    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.5 Pro
+    // v4.6 Pro Welcome Template
+    const WELCOME_CHECKLIST_TEMPLATE = `# ⚡ Welcome to QuickPad v4.6 Pro
 
 Your hyper-fast, serverless scratchpad with **zero-knowledge end-to-end encryption**.
 Everything you type is encrypted directly in your browser with AES-256 before leaving your device. No signups, no trackers, 100% private.
@@ -626,10 +639,52 @@ Everything you type is encrypted directly in your browser with AES-256 before le
 `;
 
     // Custom Background & Theme Restore
+    function applyThemeClass(themeName) {
+        if (!document.body) return;
+        const toRemove = [];
+        document.body.classList.forEach(cls => {
+            if (cls.startsWith('theme-')) toRemove.push(cls);
+        });
+        toRemove.forEach(cls => document.body.classList.remove(cls));
+        if (themeName && typeof themeName === 'string') {
+            themeName.split(/\s+/).forEach(cls => {
+                if (cls) document.body.classList.add(cls);
+            });
+        }
+    }
+
+    function serializeTabsForLocalCache(tabsObj) {
+        if (!tabsObj || typeof tabsObj !== 'object') return '{}';
+        const safeTabs = {};
+        for (let tid in tabsObj) {
+            const t = tabsObj[tid];
+            if (!t) continue;
+            if (t.is_secret) {
+                let encBlob = t.encrypted_blob || '';
+                if (!encBlob && t.secret_pass && t.content && !t.content.startsWith('U2FsdGVkX1') && typeof CryptoJS !== 'undefined') {
+                    try { encBlob = CryptoJS.AES.encrypt(t.content, t.secret_pass).toString(); } catch(e) {}
+                } else if (!encBlob && t.content && t.content.startsWith('U2FsdGVkX1')) {
+                    encBlob = t.content;
+                }
+                safeTabs[tid] = {
+                    name: t.name,
+                    content: '',
+                    encrypted_blob: encBlob,
+                    is_encrypted: !!t.is_encrypted,
+                    is_secret: true,
+                    secret_pass: null
+                };
+            } else {
+                safeTabs[tid] = { ...t };
+            }
+        }
+        return JSON.stringify(safeTabs);
+    }
+
     let customBgColor = localStorage.getItem('quickpad_bg');
     if (customBgColor) document.body.style.backgroundColor = customBgColor;
     const savedTheme = localStorage.getItem('quickpad_theme');
-    if (savedTheme) document.body.className = savedTheme;
+    if (savedTheme) applyThemeClass(savedTheme);
 
     // Screensaver Timeout State
     let storedTime = localStorage.getItem('quickpad_screensaver_time');
@@ -886,15 +941,57 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     // 2. --- Cipher Decryption Glitch Animation ---
     let glitchInterval = null;
     let currentGlitchOriginal = '';
+    let glitchIntervalPane2 = null;
+    let currentGlitchOriginalPane2 = '';
 
     function stopCipherGlitchAnimation() {
         if (glitchInterval) {
             clearInterval(glitchInterval);
             glitchInterval = null;
-            if (editor && currentGlitchOriginal) {
+            if (editor) {
+                editor.classList.remove('cipher-decrypting');
                 editor.value = currentGlitchOriginal;
             }
         }
+    }
+
+    function stopCipherGlitchAnimationPane2() {
+        if (glitchIntervalPane2) {
+            clearInterval(glitchIntervalPane2);
+            glitchIntervalPane2 = null;
+            if (multiPane2Editor) {
+                multiPane2Editor.classList.remove('cipher-decrypting');
+                multiPane2Editor.value = currentGlitchOriginalPane2;
+            }
+        }
+    }
+
+    function buildScrambledFrame(original, len, progress, glyphs) {
+        let scrambled = '';
+        for (let i = 0; i < len; i++) {
+            const char = original[i];
+            if (char === '\n' || char === '\r' || char === ' ' || char === '\t') {
+                scrambled += char;
+            } else {
+                // Reveal threshold sweeps from 0.14 (start of note) to 0.88 (end of visible note)
+                const revealThreshold = 0.14 + (len > 1 ? (i / (len - 1)) : 0) * 0.74;
+                if (progress >= revealThreshold) {
+                    // Character has locked into its true decrypted plaintext
+                    scrambled += char;
+                } else if (progress >= revealThreshold - 0.22) {
+                    // Active decryption wavefront: rapid flicker between cyber glyph and true char
+                    if (Math.random() < 0.32) {
+                        scrambled += char;
+                    } else {
+                        scrambled += glyphs[Math.floor(Math.random() * glyphs.length)];
+                    }
+                } else {
+                    // Encrypted ciphertext ahead of the wavefront
+                    scrambled += glyphs[Math.floor(Math.random() * glyphs.length)];
+                }
+            }
+        }
+        return scrambled + original.substring(len);
     }
 
     function triggerCipherGlitchAnimation(targetText) {
@@ -907,47 +1004,63 @@ Everything you type is encrypted directly in your browser with AES-256 before le
         // Scramble up to 1500 characters so all visible viewport content is deciphered
         const len = Math.min(original.length, 1500);
         let iteration = 0;
-        // 24 frames @ 45ms ≈ 1.08 seconds for a visible, satisfying decryption wave
-        const maxIter = 24;
-        
+        // 20 frames @ 38ms ≈ 0.76 seconds for a crisp, unmistakable decryption wave
+        const maxIter = 20;
+
+        editor.classList.add('cipher-decrypting');
+        // Render frame 0 synchronously so switching tabs starts encrypted immediately
+        editor.value = buildScrambledFrame(original, len, 0, glyphs);
+        iteration = 1;
+
         glitchInterval = setInterval(() => {
-            let scrambled = '';
-            const progress = iteration / maxIter;
-
-            for (let i = 0; i < len; i++) {
-                const char = original[i];
-                if (char === '\n' || char === ' ' || char === '\t') {
-                    scrambled += char;
-                } else {
-                    const charPos = i / len;
-                    if (progress >= charPos + 0.12) {
-                        // Fully decrypted
-                        scrambled += char;
-                    } else if (progress >= charPos - 0.18) {
-                        // Decryption wavefront: rapid flicker between cyber glyph and real character
-                        if (Math.random() < 0.28) {
-                            scrambled += char;
-                        } else {
-                            scrambled += glyphs[Math.floor(Math.random() * glyphs.length)];
-                        }
-                    } else {
-                        // Encrypted ciphertext ahead of wavefront
-                        scrambled += glyphs[Math.floor(Math.random() * glyphs.length)];
-                    }
-                }
+            if (!editor) {
+                stopCipherGlitchAnimation();
+                return;
             }
-
-            if (editor) {
-                editor.value = scrambled + original.substring(len);
-            }
-            iteration++;
-
-            if (iteration > maxIter) {
+            if (iteration >= maxIter) {
                 clearInterval(glitchInterval);
                 glitchInterval = null;
-                if (editor) editor.value = original;
+                editor.classList.remove('cipher-decrypting');
+                editor.value = original;
+                return;
             }
-        }, 45);
+            const progress = iteration / maxIter;
+            editor.value = buildScrambledFrame(original, len, progress, glyphs);
+            iteration++;
+        }, 38);
+    }
+
+    function triggerCipherGlitchAnimationPane2(targetText) {
+        if (!multiPane2Editor || !isGlitchDecryptEnabled || !targetText) return;
+        stopCipherGlitchAnimationPane2();
+
+        currentGlitchOriginalPane2 = targetText;
+        const glyphs = '01λ§0x#*¢∆µØ9876543210ABCDEF';
+        const original = targetText;
+        const len = Math.min(original.length, 1500);
+        let iteration = 0;
+        const maxIter = 20;
+
+        multiPane2Editor.classList.add('cipher-decrypting');
+        multiPane2Editor.value = buildScrambledFrame(original, len, 0, glyphs);
+        iteration = 1;
+
+        glitchIntervalPane2 = setInterval(() => {
+            if (!multiPane2Editor) {
+                stopCipherGlitchAnimationPane2();
+                return;
+            }
+            if (iteration >= maxIter) {
+                clearInterval(glitchIntervalPane2);
+                glitchIntervalPane2 = null;
+                multiPane2Editor.classList.remove('cipher-decrypting');
+                multiPane2Editor.value = original;
+                return;
+            }
+            const progress = iteration / maxIter;
+            multiPane2Editor.value = buildScrambledFrame(original, len, progress, glyphs);
+            iteration++;
+        }, 38);
     }
 
     // 3. --- Real-Time WPM & Momentum Gauge ---
@@ -984,7 +1097,7 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     // 4. --- Interactive Markdown Task Progress Meter ---
     function updateTaskProgress() {
         if (!editor || !hudTasks || !hudTasksContainer) return;
-        const text = editor.value || '';
+        const text = (glitchInterval ? currentGlitchOriginal : editor.value) || '';
         const totalMatches = text.match(/^\s*-\s*\[[ xX]\]/gm);
         if (!totalMatches || totalMatches.length === 0) {
             hudTasksContainer.classList.add('hidden');
@@ -1141,10 +1254,11 @@ Everything you type is encrypted directly in your browser with AES-256 before le
         function resizeWbCanvas() {
             if (!canvasContainer || canvasContainer.classList.contains('hidden')) return;
             const rect = canvasContainer.getBoundingClientRect();
-            const temp = wbCtx.getImageData(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
-            whiteboardCanvas.width = rect.width;
-            whiteboardCanvas.height = rect.height - 42;
-            wbCtx.putImageData(temp, 0, 0);
+            const hasDims = whiteboardCanvas.width > 0 && whiteboardCanvas.height > 0;
+            const temp = hasDims ? wbCtx.getImageData(0, 0, whiteboardCanvas.width, whiteboardCanvas.height) : null;
+            whiteboardCanvas.width = Math.max(1, rect.width);
+            whiteboardCanvas.height = Math.max(1, rect.height - 42);
+            if (temp) wbCtx.putImageData(temp, 0, 0);
         }
         window.addEventListener('resize', resizeWbCanvas);
 
@@ -1152,6 +1266,7 @@ Everything you type is encrypted directly in your browser with AES-256 before le
             wbIsDrawing = true;
             saveWbHistory();
             strokeBatch = []; // reset batch on new stroke
+            wbCtx.beginPath();
             draw(e);
         }
 
@@ -1368,7 +1483,7 @@ Everything you type is encrypted directly in your browser with AES-256 before le
             remoteVoiceNextTime += buffer.duration;
 
             // Illuminate remote speaker avatar
-            const remoteBubble = document.querySelector(`.peer-avatar-bubble[data-cid="${chunkData.senderId}"]`);
+            const remoteBubble = document.querySelector(`.peer-avatar-wrapper[data-cid="${chunkData.senderId}"] .peer-avatar-bubble`);
             if (remoteBubble) {
                 remoteBubble.classList.add('speaking');
                 clearTimeout(remoteBubble.__speakTimeout);
@@ -1381,7 +1496,7 @@ Everything you type is encrypted directly in your browser with AES-256 before le
 
     function handleRemoteVoiceStop(data) {
         if (!data || data.senderId === myDeviceId) return;
-        const remoteBubble = document.querySelector(`.peer-avatar-bubble[data-cid="${data.senderId}"]`);
+        const remoteBubble = document.querySelector(`.peer-avatar-wrapper[data-cid="${data.senderId}"] .peer-avatar-bubble`);
         if (remoteBubble) remoteBubble.classList.remove('speaking');
     }
 
@@ -1909,6 +2024,9 @@ Everything you type is encrypted directly in your browser with AES-256 before le
         },
 
         updateSidetoneUi() {
+            if (voiceTestIcon) {
+                voiceTestIcon.textContent = hearMyVoice ? '🔊' : '🔇';
+            }
             if (voiceTestText) {
                 voiceTestText.textContent = hearMyVoice ? 'Hear My Voice: ON' : 'Hear My Voice: OFF';
             }
@@ -2110,12 +2228,13 @@ Everything you type is encrypted directly in your browser with AES-256 before le
     if (voiceTestMonitorBtn) {
         voiceTestMonitorBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            // If mic not active yet, initialize it so user can test immediately
+            // If mic not active yet, initialize it and update voice state so user can test immediately
             if (!VoiceMaskEngine.micStream) {
                 const ok = await VoiceMaskEngine.startMic();
                 if (!ok) return;
-                // Temporarily transmit for testing
+                isVoiceActive = true;
                 VoiceMaskEngine.setTransmitting(true);
+                updateVoiceUI();
             }
             VoiceMaskEngine.toggleHearMyVoice();
         });
@@ -2212,12 +2331,21 @@ Everything you type is encrypted directly in your browser with AES-256 before le
                     editor.value = editor.value.substring(0, cursor) + text + ' ' + editor.value.substring(editor.selectionEnd || cursor);
                     editor.selectionStart = editor.selectionEnd = cursor + text.length + 1;
                     if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
-            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
-                multiPane2Editor.value = editor.value;
-                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
-            }
-                    if (typeof debouncedSave === 'function') debouncedSave();
-                    else saveWorkspace();
+                    tabsContentDirty = true;
+                    dirtyTabIds.add(activeTabId);
+                    if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                        multiPane2Editor.value = editor.value;
+                        if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+                    }
+                    broadcastLocalSync({
+                        type: 'tab_content',
+                        tid: activeTabId,
+                        content: editor.value,
+                        senderId: myDeviceId
+                    });
+                    updateHUD();
+                    if (isMarkdown || isSplitMode) updatePreview();
+                    scheduleWorkspaceSave();
                 } else {
                     interimTranscript += event.results[i][0].transcript;
                 }
@@ -2552,7 +2680,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const theme = btn.getAttribute('data-theme') || '';
-            document.body.className = theme;
+            applyThemeClass(theme);
             localStorage.setItem('quickpad_theme', theme);
             showToast("Theme updated", 'info');
         });
@@ -2748,7 +2876,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (!isMarkdown && !isSplitMode) return;
         if (!preview || !editor) return;
         
-        const rawContent = editor.value || '';
+        const rawContent = (glitchInterval ? currentGlitchOriginal : editor.value) || '';
 
         // Fallback if marked library failed to load or is unavailable
         if (typeof marked === 'undefined') {
@@ -2855,10 +2983,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (!editor) return;
         const lines = editor.value.split('\n');
         let currentTask = 0;
+        let inCodeBlock = false;
+        const taskRegex = /^(\s*(?:[-*+]|\d+\.)\s+\[)[ xX](\])/;
         for (let i = 0; i < lines.length; i++) {
-            if (/^\s*-\s*\[[ xX]\]/.test(lines[i])) {
+            if (/^\s*```/.test(lines[i])) {
+                inCodeBlock = !inCodeBlock;
+                continue;
+            }
+            if (inCodeBlock) continue;
+            if (taskRegex.test(lines[i])) {
                 if (currentTask === taskIndex) {
-                    lines[i] = lines[i].replace(/^(\s*-\s*\[)[ xX](\])/, `$1${isChecked ? 'x' : ' '}$2`);
+                    lines[i] = lines[i].replace(taskRegex, `$1${isChecked ? 'x' : ' '}$2`);
                     break;
                 }
                 currentTask++;
@@ -2866,7 +3001,20 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
         editor.value = lines.join('\n');
         if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+        tabsContentDirty = true;
+        dirtyTabIds.add(activeTabId);
+        if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+            multiPane2Editor.value = editor.value;
+            if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+        }
+        broadcastLocalSync({
+            type: 'tab_content',
+            tid: activeTabId,
+            content: editor.value,
+            senderId: myDeviceId
+        });
         updateHUD();
+        updatePreview();
         saveWorkspace();
     }
 
@@ -3064,6 +3212,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (viewParam) {
                 isReadOnly = true;
                 rawToken = viewParam;
+                if (!rawToken.includes('_') && window.location.hash && window.location.hash.length > 1) {
+                    rawToken = `${viewParam}_${window.location.hash.substring(1)}`;
+                }
                 if (editor) {
                     editor.readOnly = true;
                     editor.placeholder = "This document is in Read-Only mode.";
@@ -3106,6 +3257,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         showToast("Passcode required to view note.", "error");
                         break;
                     }
+                    if (duressPin && enteredPass.trim() === duressPin.trim()) {
+                        isDuressUnlocked = true;
+                        isReadOnly = true;
+                        unlocked = true;
+                        break;
+                    }
                     try {
                         const dec = CryptoJS.AES.decrypt(decodeURIComponent(encKey), enteredPass.trim()).toString(CryptoJS.enc.Utf8);
                         if (dec && dec.length > 0) {
@@ -3120,6 +3277,25 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         showToast("Incorrect passcode. Try again.", "error");
                     }
                 }
+                if (isDuressUnlocked) {
+                    tabsData = { 'main': { name: 'notes.txt', content: duressContent || 'Biology 101 Lecture Notes - Cell Mitosis\n\n1. Interphase\n2. Prophase\n3. Metaphase\n4. Anaphase\n5. Telophase', is_encrypted: false } };
+                    activeTabId = 'main';
+                    renderTabs();
+                    if (editor) {
+                        editor.value = tabsData['main'].content;
+                        editor.readOnly = true;
+                    }
+                    updatePreview();
+                    updateHUD();
+                    return;
+                }
+                if (!unlocked) {
+                    if (editor) {
+                        editor.value = "🔒 Protected Read-Only Note — Passcode required to decrypt.";
+                        editor.readOnly = true;
+                    }
+                    return;
+                }
             } else if (rawToken.includes('_')) {
                 let parts = rawToken.split('_');
                 currentToken = parts[0];
@@ -3128,6 +3304,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             } else {
                 currentToken = rawToken;
                 urlKey = null;
+                if (typeof CryptoJS !== 'undefined' && currentToken) {
+                    vaultPassword = CryptoJS.SHA256('qp_vault_' + currentToken).toString().substring(0, 24);
+                }
             }
 
             // Fresh workspaces start clean & blank. Example guide can be opened via Settings, File menu, or Command Palette.
@@ -3272,6 +3451,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             lastSavedTabsJSON = JSON.stringify(tabsData);
                             lastSyncedServerTabs[data.tid] = { content: data.content };
                             dirtyTabIds.delete(data.tid);
+                            try { localStorage.setItem('quickpad_cached_tabs_' + token, serializeTabsForLocalCache(tabsData)); } catch(e) {}
                             if (data.tid === activeTabId) {
                                 const isFocused = (document.activeElement === editor);
                                 if (!isTypingInTab(data.tid) || !isFocused) {
@@ -3321,21 +3501,44 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 tabsData[tid] = data.tabs[tid];
                             } else {
                                 tabsData[tid].name = data.tabs[tid].name;
+                                if (!dirtyTabIds.has(tid) && typeof data.tabs[tid].content === 'string') {
+                                    if (!data.tabs[tid].is_secret || tabsData[tid].secret_pass) {
+                                        tabsData[tid].content = data.tabs[tid].content;
+                                    }
+                                }
                                 if (tabsData[tid].is_secret !== !!data.tabs[tid].is_secret) {
                                     tabsData[tid].is_secret = !!data.tabs[tid].is_secret;
                                     if (!tabsData[tid].is_secret) tabsData[tid].secret_pass = null;
                                 }
                             }
                         }
+                        // Remove tabs deleted in another local tab
+                        for (let existingTid in tabsData) {
+                            if (!data.tabs[existingTid] && !dirtyTabIds.has(existingTid)) {
+                                delete tabsData[existingTid];
+                            }
+                        }
                         ensureTabOrder();
+                        if (!tabsData[activeTabId]) {
+                            activeTabId = tabOrder[0] || Object.keys(tabsData)[0] || 'main';
+                            if (!tabsData[activeTabId]) {
+                                tabsData[activeTabId] = { name: 'main.txt', content: '', is_encrypted: false };
+                            }
+                            switchTab(activeTabId, true);
+                        }
                         lastSavedTabsJSON = JSON.stringify(tabsData);
+                        try { localStorage.setItem('quickpad_cached_tabs_' + token, serializeTabsForLocalCache(tabsData)); } catch(e) {}
                         renderTabs();
                         updateMultiPaneSelectors();
+                        if (multiNoteMode === 2) loadMultiPaneContent(2);
                         if (typeof checkLockedTabUI === 'function') checkLockedTabUI(activeTabId);
                         if (tabsData[activeTabId] && editor && (!tabsData[activeTabId].is_secret || tabsData[activeTabId].secret_pass)) {
-                            editor.value = tabsData[activeTabId].content || '';
-                            updatePreview();
-                            updateHUD();
+                            const isDraw = tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw');
+                            if (!isDraw) {
+                                editor.value = tabsData[activeTabId].content || '';
+                                updatePreview();
+                                updateHUD();
+                            }
                         }
                     }
                 } else if (data.type === 'cursor_presence') {
@@ -3349,6 +3552,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             avatar: data.cursor.avatar,
                             speaking: !!data.cursor.speaking,
                             timestamp: data.cursor.timestamp || Date.now(),
+                            lastSeenLocalTime: Date.now(),
                             isLocalTab: true
                         };
                         const tabId = data.cursor.tabId || 'main';
@@ -3442,6 +3646,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         broadcastLocalSync({
                             type: 'tabs_structure',
                             tabs: tabsData,
+                            tab_order: tabOrder,
                             senderId: myDeviceId
                         });
                     }
@@ -3487,12 +3692,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (cid === myDeviceId) continue;
             const c = peerCursorsData[cid];
             if (!c) continue;
-            // Prune if inactive for more than 35 seconds and purge stale ghost records from cloud
+            // Prune if inactive for more than 35 seconds locally
             const lastActive = Math.max(c.lastSeenLocalTime || 0, c.timestamp || 0);
             if (now - lastActive > 35000) {
                 removePeerCursor(cid);
                 delete peerCursorsData[cid];
-                if (db && currentToken && !isBurnMode) {
+                // Only purge from cloud if very stale (> 120s) to avoid cross-device clock skew delete wars
+                if (db && currentToken && !isBurnMode && (now - lastActive > 120000)) {
                     try {
                         const delPayload = {};
                         delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
@@ -3530,7 +3736,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
         let totalUnread = 0;
         for (let cid in unreadMessages) {
-            totalUnread += (unreadMessages[cid] || 0);
+            if (activeUsers.has(cid)) {
+                totalUnread += (unreadMessages[cid] || 0);
+            }
         }
         if (onlineCountBadge) {
             onlineCountBadge.classList.toggle('has-unread-dms', totalUnread > 0);
@@ -3654,12 +3862,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (base === remote) return { text: local, cursor: Math.min(localCursor, local.length) };
         if (local === remote) return { text: local, cursor: Math.min(localCursor, local.length) };
 
-        // If one contains the other, prefer the superset
-        if (local.includes(remote)) {
-            return { text: local, cursor: localCursor };
-        }
-        if (remote.includes(local)) {
-            return { text: remote, cursor: Math.min(localCursor, remote.length) };
+        // If base is empty, and one contains the other, prefer the superset
+        if (!base) {
+            if (local.includes(remote)) {
+                return { text: local, cursor: localCursor };
+            }
+            if (remote.includes(local)) {
+                return { text: remote, cursor: Math.min(localCursor, remote.length) };
+            }
         }
 
         const cLocal = computeChange(base, local);
@@ -3732,6 +3942,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         try {
             unsubscribeWorkspace = db.collection("workspaces").doc(token).onSnapshot((docSnap) => {
                 try {
+                    if (isDuressUnlocked) return;
                     if (docSnap && docSnap.exists) {
                         const data = docSnap.data();
 
@@ -3751,7 +3962,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 if (vaultPassword && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
                                     try {
                                         const dec = CryptoJS.AES.decrypt(content, vaultPassword).toString(CryptoJS.enc.Utf8);
-                                        if (dec) content = dec;
+                                        if (dec && dec.length > 0) content = dec;
                                     } catch(e) {}
                                 }
                                 lastSyncedServerTabs[tid] = { content: content };
@@ -3801,8 +4012,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 isReadOnly = true;
                                 tabsData = { 'main': { name: 'notes.txt', content: duressContent || 'Biology 101 Lecture Notes - Cell Mitosis\n\n1. Interphase\n2. Prophase\n3. Metaphase\n4. Anaphase\n5. Telophase', is_encrypted: false } };
                                 renderTabs();
-                                switchTab('main');
-                                showToast("🛡️ Decoy Vault Opened", 'info');
+                                switchTab('main', true);
                                 return;
                             }
                         }
@@ -3836,12 +4046,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             for (let tid in serverTabs) {
                                 let sTab = serverTabs[tid];
                                 let content = sTab.content || '';
-                                if (content.startsWith("U2FsdGVkX1") && !sTab.is_secret) {
+                                if (content.startsWith("U2FsdGVkX1")) {
                                     if (vaultPassword && typeof CryptoJS !== 'undefined') {
                                         try {
                                             const bytes = CryptoJS.AES.decrypt(content, vaultPassword);
                                             const dec = bytes.toString(CryptoJS.enc.Utf8);
-                                            if (dec || bytes.sigBytes >= 0) content = dec;
+                                            if (dec && dec.length > 0) content = dec;
                                         } catch(e) {}
                                     }
                                 }
@@ -3850,7 +4060,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         try {
                                             const bytes = CryptoJS.AES.decrypt(content, tabsData[tid].secret_pass);
                                             const dec = bytes.toString(CryptoJS.enc.Utf8);
-                                            if (!(dec === "" && bytes.sigBytes < 0)) content = dec;
+                                            if (dec && dec.length > 0) content = dec;
                                         } catch(e) {}
                                     }
                                 }
@@ -3943,11 +4153,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         updateHUD();
                                     }
                                     if (multiNoteMode === 2 && multiPaneTabs.pane2 === tid && multiPane2Editor) {
-                                        if (!isServerSecret || tabsData[tid].secret_pass) {
-                                            multiPane2Editor.value = content;
-                                            multiPane2Editor.readOnly = isReadOnly;
-                                        }
-                                        if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+                                        loadMultiPaneContent(2);
                                     }
                                 } else {
                                     if (tabsData[tid].name !== sTab.name) { 
@@ -3968,6 +4174,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         tabsData[tid].encrypted_blob = content;
                                         if (tid === activeTabId && typeof checkLockedTabUI === 'function') {
                                             checkLockedTabUI(tid);
+                                        }
+                                        if (multiNoteMode === 2 && multiPaneTabs.pane2 === tid) {
+                                            loadMultiPaneContent(2);
                                         }
                                         lastSyncedServerTabs[tid] = { content: content };
                                         continue;
@@ -3995,7 +4204,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                             triggerTabRemoteActivity(tid, null, null);
                                         }
 
-                                        if (isDirtyLocally && isCurrentlyTypingInThisTab) {
+                                        if (isDirtyLocally || isCurrentlyTypingInThisTab) {
                                             // Non-blocking 3-way concurrent merge!
                                             const activeTextarea = (tid === activeTabId) ? editor : ((multiNoteMode === 2 && multiPaneTabs.pane2 === tid) ? multiPane2Editor : null);
                                             const currentCursor = activeTextarea ? activeTextarea.selectionStart || 0 : 0;
@@ -4024,13 +4233,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                                     loadWhiteboardFromTab(finalContent);
                                                 }
                                             } else if (editor) {
-                                                const isFocused = (document.activeElement === editor);
-                                                const cursor = (newCursorPos !== null) ? newCursorPos : (editor.selectionStart || 0);
-                                                editor.value = finalContent;
-                                                editor.readOnly = isReadOnly;
-                                                if (isFocused) {
-                                                    const safePos = Math.min(cursor, finalContent.length);
-                                                    editor.setSelectionRange(safePos, safePos);
+                                                if (glitchInterval && currentGlitchOriginal === finalContent) {
+                                                    // Keep cipher animation running if content matches
+                                                } else {
+                                                    if (glitchInterval) stopCipherGlitchAnimation();
+                                                    const isFocused = (document.activeElement === editor);
+                                                    const cursor = (newCursorPos !== null) ? newCursorPos : (editor.selectionStart || 0);
+                                                    editor.value = finalContent;
+                                                    editor.readOnly = isReadOnly;
+                                                    if (isFocused) {
+                                                        const safePos = Math.min(cursor, finalContent.length);
+                                                        editor.setSelectionRange(safePos, safePos);
+                                                    }
                                                 }
                                                 updatePreview();
                                                 updateHUD();
@@ -4039,25 +4253,31 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
                                         // 2. Secondary Editor (Pane 2)
                                         if (multiNoteMode === 2 && multiPaneTabs.pane2 === tid && multiPane2Editor) {
-                                            const isP2Focused = (document.activeElement === multiPane2Editor);
-                                            const pCursor = (newCursorPos !== null) ? newCursorPos : (multiPane2Editor.selectionStart || 0);
-                                            multiPane2Editor.value = finalContent;
-                                            multiPane2Editor.readOnly = isReadOnly;
-                                            if (isP2Focused) {
-                                                const safePos = Math.min(pCursor, finalContent.length);
-                                                multiPane2Editor.setSelectionRange(safePos, safePos);
+                                            const isDrawP2 = tabsData[tid].name && tabsData[tid].name.endsWith('.draw');
+                                            if (isDrawP2 || (tabsData[tid].is_secret && !tabsData[tid].secret_pass)) {
+                                                loadMultiPaneContent(2);
+                                            } else {
+                                                const isP2Focused = (document.activeElement === multiPane2Editor);
+                                                const pCursor = (newCursorPos !== null) ? newCursorPos : (multiPane2Editor.selectionStart || 0);
+                                                multiPane2Editor.value = finalContent;
+                                                multiPane2Editor.readOnly = isReadOnly;
+                                                delete multiPane2Editor.dataset.isPlaceholder;
+                                                if (isP2Focused) {
+                                                    const safePos = Math.min(pCursor, finalContent.length);
+                                                    multiPane2Editor.setSelectionRange(safePos, safePos);
+                                                }
+                                                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
                                             }
-                                            if (multiPanePreviews.pane2) updateMultiPanePreview(2);
                                         }
                                     }
                                 }
                                 lastSyncedServerTabs[tid] = { content: content };
                             }
                             
-                            // Remove tabs deleted remotely (only when serverTabs has entries)
+                            // Remove tabs deleted remotely (only when serverTabs has entries and tab is not dirty locally)
                             if (Object.keys(serverTabs).length > 0) {
                                 for (let tid in tabsData) {
-                                    if (!serverTabs[tid]) {
+                                    if (!serverTabs[tid] && !dirtyTabIds.has(tid)) {
                                         delete tabsData[tid];
                                         tabsUpdated = true;
                                         if (tid === activeTabId) {
@@ -4067,11 +4287,15 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                             }
                                             switchTab(activeTabId, true);
                                         }
+                                        if (multiNoteMode === 2 && multiPaneTabs.pane2 === tid) {
+                                            updateMultiPaneSelectors();
+                                            loadMultiPaneContent(2);
+                                        }
                                     }
                                 }
                             }
                             
-                            // Auto-upgrade any legacy or stale guide tabs to v4.5 Pro
+                            // Auto-upgrade any legacy or stale guide tabs to v4.6 Pro
                             const didUpgradeGuides = upgradeExistingGuideTabs();
                             if (didUpgradeGuides) {
                                 tabsUpdated = true;
@@ -4096,36 +4320,24 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 if (isDraw) {
                                     switchTab(activeTabId, true);
                                 } else if (editor) {
-                                    editor.value = tabsData[activeTabId].content || '';
+                                    const targetContent = tabsData[activeTabId].content || '';
+                                    if (!(glitchInterval && currentGlitchOriginal === targetContent)) {
+                                        editor.value = targetContent;
+                                    }
                                     editor.readOnly = isReadOnly;
                                     updatePreview();
                                     updateHUD();
                                 }
+                                if (multiNoteMode === 2) {
+                                    loadMultiPaneContent(2);
+                                }
                             }
                             
                             lastSavedTabsJSON = JSON.stringify(tabsData);
-                            try { localStorage.setItem('quickpad_cached_tabs_' + token, lastSavedTabsJSON); } catch(e){}
+                            try { localStorage.setItem('quickpad_cached_tabs_' + token, serializeTabsForLocalCache(tabsData)); } catch(e){}
                             if (tabsUpdated || isInitialLoad) renderTabs();
                             updateMultiPaneSelectors();
                             if (typeof checkLockedTabUI === 'function') checkLockedTabUI(activeTabId);
-                        }
-
-                        if (data.dms) {
-                            globalDms = data.dms;
-                            calculateUnread(globalDms);
-                            renderChat();
-                        }
-
-                        // v3.0 Real-Time Polls Sync
-                        if (data.polls) {
-                            workspacePolls = data.polls;
-                            if (isMarkdown || isSplitMode) updatePreview();
-                        }
-
-                        // v3.0 WebRTC Wormhole Signal Handling
-                        if (data.wormhole && data.wormhole.to === myDeviceId && data.wormhole.timestamp && data.wormhole.timestamp > lastProcessedWormholeTimestamp && (Date.now() - data.wormhole.timestamp < 60000)) {
-                            lastProcessedWormholeTimestamp = data.wormhole.timestamp;
-                            handleIncomingWormholeSignal(data.wormhole);
                         }
 
                         if (data.cursors) {
@@ -4143,7 +4355,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 if (cursorAge > 35000) {
                                     removePeerCursor(cid);
                                     delete peerCursorsData[cid];
-                                    if (db && currentToken && !isBurnMode) {
+                                    // Only purge from cloud if very stale (> 120s) to avoid cross-device clock skew delete wars
+                                    if (db && currentToken && !isBurnMode && cursorAge > 120000) {
                                         try {
                                             const delPayload = {};
                                             delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
@@ -4154,6 +4367,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
 
                                 const isNewPeer = !peerCursorsData[cid];
+                                const prevFlareTime = peerCursorsData[cid] ? peerCursorsData[cid].lastFlareTime : 0;
                                 peerCursorsData[cid] = {
                                     pos: typeof c.pos === 'number' ? c.pos : 0,
                                     name: c.name || 'Anon',
@@ -4162,7 +4376,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     avatar: c.avatar || '',
                                     speaking: !!c.speaking,
                                     timestamp: c.timestamp || now,
-                                    lastSeenLocalTime: now
+                                    lastSeenLocalTime: now,
+                                    lastFlareTime: prevFlareTime
                                 };
                                 activeUsers.set(cid, {
                                     name: c.name || 'Anon',
@@ -4182,10 +4397,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     }
                                 }
 
-                                // Check remote cursor emoji flare
+                                // Check remote cursor emoji flare (only spawn if viewing the same tab)
                                 if (c.flare && c.flare.timestamp && (now - c.flare.timestamp < 3500)) {
                                     if (!peerCursorsData[cid].lastFlareTime || peerCursorsData[cid].lastFlareTime !== c.flare.timestamp) {
-                                        spawnFlareParticle(c.pos, c.flare.emoji, false, getCaretCoordinates(c.pos));
+                                        if (isVisibleInPane1 || isVisibleInPane2) {
+                                            const targetTa = isVisibleInPane1 ? editor : multiPane2Editor;
+                                            spawnFlareParticle(c.pos, c.flare.emoji, false, getCaretCoordinates(targetTa, c.pos));
+                                        }
                                         peerCursorsData[cid].lastFlareTime = c.flare.timestamp;
                                     }
                                 }
@@ -4236,12 +4454,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
                             }
 
-                            // Prune peers that timed out (> 35s) (unless connected as local tab)
+                            // Prune peers that disconnected or timed out (> 35s) (unless connected as local tab)
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
                                 const p = peerCursorsData[existingCid];
                                 const pLastSeen = Math.max(p.lastSeenLocalTime || 0, p.timestamp || 0);
-                                if (!p.isLocalTab && (now - pLastSeen > 35000)) {
+                                if (!p.isLocalTab && (!data.cursors[existingCid] || (now - pLastSeen > 35000))) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -4252,12 +4470,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 updatePresenceUI();
                             }
                         } else {
-                            // If data.cursors is null/missing, clean up peers that timed out (> 35s)
+                            // If data.cursors is null/missing, clean up remote peers
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
                                 const p = peerCursorsData[existingCid];
-                                const pLastSeen = Math.max(p.lastSeenLocalTime || 0, p.timestamp || 0);
-                                if (!p.isLocalTab && (now - pLastSeen > 35000)) {
+                                if (!p.isLocalTab) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
@@ -4265,6 +4482,24 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             if (typeof updatePresenceUI === 'function') {
                                 updatePresenceUI();
                             }
+                        }
+
+                        if (data.dms) {
+                            globalDms = data.dms;
+                            calculateUnread(globalDms);
+                            renderChat();
+                        }
+
+                        // v3.0 Real-Time Polls Sync
+                        if (data.polls) {
+                            workspacePolls = data.polls;
+                            if (isMarkdown || isSplitMode) updatePreview();
+                        }
+
+                        // v3.0 WebRTC Wormhole Signal Handling
+                        if (data.wormhole && data.wormhole.to === myDeviceId && data.wormhole.timestamp && data.wormhole.timestamp > lastProcessedWormholeTimestamp && (Date.now() - data.wormhole.timestamp < 60000)) {
+                            lastProcessedWormholeTimestamp = data.wormhole.timestamp;
+                            handleIncomingWormholeSignal(data.wormhole);
                         }
                     } else {
                         // Brand new workspace: start clean, blank and ready for user typing
@@ -4475,9 +4710,144 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         });
     }
 
-    // --- Tabs Management with Drag & Drop ---
+    // --- Tabs Management with Drag-Scroll, Scroll Arrows & All-Tabs Quick Switcher ---
+    let wasTabStripDragged = false;
+
+    function updateTabScrollButtons() {
+        if (!tabsContainer) return;
+        const isOverflowing = tabsContainer.scrollWidth > tabsContainer.clientWidth + 2;
+        if (tabsScrollLeftBtn) {
+            tabsScrollLeftBtn.classList.toggle('hidden', !isOverflowing);
+            tabsScrollLeftBtn.classList.toggle('at-edge', tabsContainer.scrollLeft <= 2);
+        }
+        if (tabsScrollRightBtn) {
+            tabsScrollRightBtn.classList.toggle('hidden', !isOverflowing);
+            const atRightEdge = (tabsContainer.scrollLeft + tabsContainer.clientWidth) >= (tabsContainer.scrollWidth - 2);
+            tabsScrollRightBtn.classList.toggle('at-edge', atRightEdge);
+        }
+    }
+
+    function scrollTabIntoView(tid, smooth = true) {
+        if (!tabsContainer || !tid) return;
+        const tabEl = tabsContainer.querySelector(`.tab[data-tid="${tid}"]`);
+        if (!tabEl) return;
+        const containerWidth = tabsContainer.clientWidth;
+        if (containerWidth <= 0) return;
+
+        const tabLeft = tabEl.offsetLeft - tabsContainer.offsetLeft;
+        const tabRight = tabLeft + tabEl.offsetWidth;
+        const currentScroll = tabsContainer.scrollLeft;
+
+        let targetScroll = currentScroll;
+        if (tabLeft < currentScroll + 8) {
+            targetScroll = Math.max(0, tabLeft - 12);
+        } else if (tabRight > currentScroll + containerWidth - 8) {
+            targetScroll = Math.max(0, tabRight - containerWidth + 12);
+        }
+
+        if (targetScroll !== currentScroll) {
+            try {
+                tabsContainer.scrollTo({ left: targetScroll, behavior: smooth ? 'smooth' : 'auto' });
+            } catch (e) {
+                tabsContainer.scrollLeft = targetScroll;
+            }
+        }
+        setTimeout(updateTabScrollButtons, smooth ? 220 : 20);
+    }
+
+    function renderAllTabsDropdownList() {
+        ensureTabOrder();
+        const total = tabOrder.filter(tid => tabsData[tid]).length;
+        if (allTabsCount) allTabsCount.innerText = total;
+        if (allTabsMenuSubtitle) allTabsMenuSubtitle.innerText = `${total} ${total === 1 ? 'note' : 'notes'}`;
+        if (!allTabsList) return;
+
+        allTabsList.innerHTML = '';
+        tabOrder.forEach((tid, idx) => {
+            const tab = tabsData[tid];
+            if (!tab) return;
+
+            const item = document.createElement('div');
+            item.className = 'all-tabs-item' + (tid === activeTabId ? ' active' : '');
+
+            const left = document.createElement('div');
+            left.className = 'all-tabs-item-left';
+
+            const idxBadge = document.createElement('span');
+            idxBadge.className = 'all-tabs-item-idx';
+            idxBadge.innerText = idx + 1;
+            left.appendChild(idxBadge);
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'all-tabs-item-name';
+            const isDraw = tab.name && tab.name.endsWith('.draw');
+            const prefix = tab.is_secret ? '🔒 ' : (isDraw ? '🎨 ' : '📝 ');
+            nameSpan.innerText = prefix + tab.name;
+            left.appendChild(nameSpan);
+
+            const actions = document.createElement('div');
+            actions.className = 'all-tabs-item-actions';
+
+            const splitBtn = document.createElement('button');
+            splitBtn.type = 'button';
+            splitBtn.className = 'all-tabs-mini-btn';
+            splitBtn.title = `Open "${tab.name}" in Pane 2 (Side-by-Side)`;
+            splitBtn.innerText = '◫';
+            splitBtn.onclick = (e) => {
+                e.stopPropagation();
+                closeAllDropdowns();
+                if (multiNoteMode < 2) setMultiNoteLayout(2, tid);
+                else selectTabInMultiPane(2, tid);
+                showToast(`Opened "${tab.name}" in Pane 2`, 'info');
+            };
+            actions.appendChild(splitBtn);
+
+            const delMiniBtn = document.createElement('button');
+            delMiniBtn.type = 'button';
+            delMiniBtn.className = 'all-tabs-mini-btn delete';
+            delMiniBtn.title = `Delete "${tab.name}"`;
+            delMiniBtn.innerText = '✕';
+            delMiniBtn.onclick = (e) => {
+                e.stopPropagation();
+                closeAllDropdowns();
+                const tabCloseEl = tabsContainer ? tabsContainer.querySelector(`.tab[data-tid="${tid}"] .tab-close`) : null;
+                if (tabCloseEl) tabCloseEl.click();
+            };
+            actions.appendChild(delMiniBtn);
+
+            item.appendChild(left);
+            item.appendChild(actions);
+
+            item.onclick = () => {
+                closeAllDropdowns();
+                switchTab(tid);
+                scrollTabIntoView(tid, true);
+            };
+
+            allTabsList.appendChild(item);
+        });
+
+        // Add "+ New Note Tab" quick button at the bottom of the dropdown
+        const newTabRow = document.createElement('button');
+        newTabRow.type = 'button';
+        newTabRow.className = 'menu-action-btn';
+        newTabRow.style.marginTop = '4px';
+        newTabRow.style.borderTop = '1px solid var(--border-color)';
+        newTabRow.style.paddingTop = '8px';
+        newTabRow.style.color = 'var(--primary-color)';
+        newTabRow.style.fontWeight = '600';
+        newTabRow.innerHTML = '<span>➕ New Note Tab...</span>';
+        newTabRow.onclick = (e) => {
+            e.stopPropagation();
+            closeAllDropdowns();
+            if (addTabBtn) addTabBtn.click();
+        };
+        allTabsList.appendChild(newTabRow);
+    }
+
     function renderTabs() {
         if (!tabsContainer) return;
+        const prevScrollLeft = tabsContainer.scrollLeft;
         tabsContainer.innerHTML = '';
         ensureTabOrder();
 
@@ -4485,9 +4855,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (!tabsData[tid]) return;
             let t = document.createElement('div');
             t.className = 'tab' + (tid === activeTabId ? ' active' : ''); 
-            t.title = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name + ' (Drag to reorder • Right-click for options)';
+            t.title = (tabsData[tid].is_secret ? '🔒 ' : '') + tabsData[tid].name + ' (Click to switch • Drag bar to scroll • Right-click for options)';
             t.setAttribute('data-tid', tid);
-            t.draggable = true;
+            // Only enable native HTML5 drag when all tabs fit or user holds Alt/Shift,
+            // so regular mouse dragging smoothly scrolls the tab bar when there are many tabs
+            t.draggable = false;
+            t.addEventListener('mousedown', (e) => {
+                if (e.altKey || e.shiftKey || (tabsContainer.scrollWidth <= tabsContainer.clientWidth + 2)) {
+                    t.draggable = true;
+                } else {
+                    t.draggable = false;
+                }
+            });
 
             let remoteDot = document.createElement('span');
             remoteDot.className = 'tab-remote-dot';
@@ -4517,16 +4896,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 if (confirmed) {
                     clearTabRemoteActivity(tid);
                     delete tabsData[tid];
+                    dirtyTabIds.add(tid);
+                    isTabOrderDirty = true;
                     tabOrder = tabOrder.filter(id => id !== tid);
                     ensureTabOrder();
                     tabsContentDirty = true;
-                dirtyTabIds.add(activeTabId);
                     if (tid === activeTabId) {
                         activeTabId = tabOrder[0] || null;
                         if (!activeTabId) {
                             activeTabId = generateToken();
                             tabsData[activeTabId] = { name: 'main.txt', content: '', is_encrypted: false };
                             tabOrder = [activeTabId];
+                            dirtyTabIds.add(activeTabId);
                         }
                         switchTab(activeTabId);
                     }
@@ -4671,12 +5052,15 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             t.ondblclick = (e) => {
                 e.stopPropagation();
                 if (t.querySelector('.tab-rename-input')) return;
+                t.draggable = false;
                 const oldName = tabsData[tid].name;
                 t.innerHTML = '';
                 const input = document.createElement('input');
                 input.type = 'text';
                 input.className = 'tab-rename-input';
                 input.value = oldName;
+                input.addEventListener('click', (ev) => ev.stopPropagation());
+                input.addEventListener('mousedown', (ev) => ev.stopPropagation());
                 t.appendChild(input);
                 input.focus();
                 input.select();
@@ -4693,8 +5077,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         if (wasDraw !== nowDraw) {
                             tabsData[tid].content = '';
                         }
+                        if (nowDraw) {
+                            initStrokesListener();
+                        }
                         tabsContentDirty = true;
-                dirtyTabIds.add(activeTabId);
+                        dirtyTabIds.add(tid);
+                        isTabOrderDirty = true;
                         broadcastLocalSync({
                             type: 'tabs_structure',
                             tabs: tabsData,
@@ -4707,6 +5095,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             saveWorkspace();
                             renderTabs();
                             updateMultiPaneSelectors();
+                            if (multiNoteMode === 2 && multiPaneTabs.pane2 === tid) {
+                                loadMultiPaneContent(2);
+                            }
                         }
                         showToast(`Renamed tab to "${val}"`, 'success');
                         return;
@@ -4720,6 +5111,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         commit();
                     } else if (ke.key === 'Escape') {
                         ke.preventDefault();
+                        ke.stopPropagation();
                         committed = true;
                         renderTabs();
                     }
@@ -4727,18 +5119,129 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 input.onblur = commit;
             };
 
-            t.onclick = () => switchTab(tid);
+            t.onclick = () => {
+                if (wasTabStripDragged) return;
+                switchTab(tid);
+                scrollTabIntoView(tid, true);
+            };
             t.appendChild(delBtn);
             tabsContainer.appendChild(t);
         });
 
-        const activeTabEl = tabsContainer.querySelector('.tab.active');
-        if (activeTabEl && tabsBar) {
-            activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-        }
+        // Restore previous scroll position so background re-renders never jump the tab strip
+        tabsContainer.scrollLeft = prevScrollLeft;
+        updateTabScrollButtons();
+        renderAllTabsDropdownList();
+        requestAnimationFrame(updateTabScrollButtons);
+
         if (typeof updateMultiPaneSelectors === 'function') {
             updateMultiPaneSelectors();
         }
+    }
+
+    // Wire up Tab Strip Horizontal Drag-to-Scroll, Wheel Scroll, and < / > Scroll Buttons
+    if (tabsContainer) {
+        let isDraggingTabs = false;
+        let tabDragStartX = 0;
+        let tabDragStartScroll = 0;
+
+        tabsContainer.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (e.target.closest('.tab-close, input')) return;
+            if (e.altKey || e.shiftKey) return;
+            if (tabsContainer.scrollWidth <= tabsContainer.clientWidth + 2) return;
+
+            isDraggingTabs = true;
+            wasTabStripDragged = false;
+            tabDragStartX = e.clientX;
+            tabDragStartScroll = tabsContainer.scrollLeft;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDraggingTabs) return;
+            const dx = e.clientX - tabDragStartX;
+            if (Math.abs(dx) > 5) {
+                wasTabStripDragged = true;
+                tabsContainer.classList.add('is-dragging-scroll');
+                e.preventDefault();
+                tabsContainer.scrollLeft = tabDragStartScroll - dx;
+                updateTabScrollButtons();
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDraggingTabs) {
+                isDraggingTabs = false;
+                tabsContainer.classList.remove('is-dragging-scroll');
+                setTimeout(() => { wasTabStripDragged = false; }, 50);
+            }
+        });
+
+        tabsContainer.addEventListener('scroll', updateTabScrollButtons, { passive: true });
+
+        if (window.ResizeObserver) {
+            const tabRo = new ResizeObserver(() => updateTabScrollButtons());
+            tabRo.observe(tabsContainer);
+            if (tabsBar) tabRo.observe(tabsBar);
+        }
+        window.addEventListener('resize', updateTabScrollButtons);
+    }
+
+    if (tabsBar) {
+        tabsBar.addEventListener('wheel', (e) => {
+            if (!tabsContainer) return;
+            if (tabsContainer.scrollWidth > tabsContainer.clientWidth) {
+                const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+                if (delta !== 0) {
+                    e.preventDefault();
+                    tabsContainer.scrollLeft += delta;
+                    updateTabScrollButtons();
+                }
+            }
+        }, { passive: false });
+    }
+
+    function setupTabScrollButton(btn, direction) {
+        if (!btn || !tabsContainer) return;
+        let holdInterval = null;
+
+        const scrollStep = (smooth = true) => {
+            const step = Math.max(130, Math.round(tabsContainer.clientWidth * 0.6)) * direction;
+            try {
+                tabsContainer.scrollBy({ left: step, behavior: smooth ? 'smooth' : 'auto' });
+            } catch (e) {
+                tabsContainer.scrollLeft += step;
+            }
+            setTimeout(updateTabScrollButtons, smooth ? 200 : 20);
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            scrollStep(true);
+        });
+
+        btn.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            clearInterval(holdInterval);
+            holdInterval = setInterval(() => scrollStep(false), 140);
+        });
+
+        ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => {
+            btn.addEventListener(evt, () => {
+                if (holdInterval) {
+                    clearInterval(holdInterval);
+                    holdInterval = null;
+                }
+            });
+        });
+    }
+
+    setupTabScrollButton(tabsScrollLeftBtn, -1);
+    setupTabScrollButton(tabsScrollRightBtn, 1);
+
+    if (allTabsDropdownGroup) {
+        allTabsDropdownGroup.addEventListener('mouseenter', renderAllTabsDropdownList);
+        allTabsDropdownGroup.addEventListener('click', renderAllTabsDropdownList);
     }
 
     async function deleteActiveTab() {
@@ -4759,6 +5262,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 activeTabId = generateToken();
                 tabsData[activeTabId] = { name: 'main.txt', content: '', is_encrypted: false };
                 tabOrder = [activeTabId];
+                dirtyTabIds.add(activeTabId);
             }
             switchTab(activeTabId);
             renderTabs();
@@ -4855,9 +5359,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         ensureTabOrder();
         if (multiPane2Select) {
             const currentSelected = multiPaneTabs.pane2;
+            let reassigned = false;
             if (!currentSelected || !tabsData[currentSelected]) {
                 const candidate = tabOrder.find(id => id !== activeTabId && tabsData[id]);
                 multiPaneTabs.pane2 = candidate || activeTabId || tabOrder[0];
+                reassigned = true;
             }
             multiPane2Select.innerHTML = '';
 
@@ -4878,23 +5384,38 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 if (tid === multiPaneTabs.pane2) opt.selected = true;
                 multiPane2Select.appendChild(opt);
             });
+
+            if (reassigned && multiNoteMode === 2 && multiPaneTabs.pane2) {
+                loadMultiPaneContent(2);
+            }
         }
         if (multiPane1Title) {
             multiPane1Title.innerText = `Pane 1: ${tabsData[activeTabId] ? tabsData[activeTabId].name : 'Note'}`;
         }
     }
 
-    function loadMultiPaneContent(paneNum = 2) {
+    function loadMultiPaneContent(paneNum = 2, animate = false) {
         const tid = multiPaneTabs.pane2;
         if (!tid || !tabsData[tid] || !multiPane2Editor) return;
+        if (glitchIntervalPane2) stopCipherGlitchAnimationPane2();
 
         const tab = tabsData[tid];
+        const isDraw = tab.name && tab.name.endsWith('.draw');
         if (tab.is_secret && !tab.secret_pass) {
             multiPane2Editor.value = "🔒 This tab is protected with a password.\n\nUnlock it in the primary tab to view/edit content here.";
             multiPane2Editor.readOnly = true;
+            multiPane2Editor.dataset.isPlaceholder = 'true';
+        } else if (isDraw) {
+            multiPane2Editor.value = "🎨 Whiteboard tab (.draw) — Open in Pane 1 to draw on the interactive canvas.";
+            multiPane2Editor.readOnly = true;
+            multiPane2Editor.dataset.isPlaceholder = 'true';
         } else {
             multiPane2Editor.value = tab.content || '';
             multiPane2Editor.readOnly = isReadOnly;
+            delete multiPane2Editor.dataset.isPlaceholder;
+            if (animate && tab.content) {
+                triggerCipherGlitchAnimationPane2(tab.content);
+            }
         }
 
         if (multiPanePreviews.pane2 && multiPane2Preview) {
@@ -4905,10 +5426,34 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     function updateMultiPanePreview(paneNum = 2) {
         if (!multiPane2Preview || !multiPane2Editor) return;
 
-        const raw = multiPane2Editor.value || '';
+        const tid = multiPaneTabs.pane2;
+        const tab = tid ? tabsData[tid] : null;
+        if (tab && tab.name && tab.name.endsWith('.draw')) {
+            if (tab.content && tab.content.startsWith('data:image/')) {
+                multiPane2Preview.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;padding:16px;"><img src="${escapeHtml(tab.content)}" alt="Whiteboard Preview" style="max-width:100%;border-radius:8px;border:1px solid rgba(0,255,249,0.2);"></div>`;
+            } else {
+                multiPane2Preview.innerText = "🎨 Blank Whiteboard (.draw)";
+            }
+            return;
+        }
+
+        let raw = (glitchIntervalPane2 ? currentGlitchOriginalPane2 : multiPane2Editor.value) || '';
         if (typeof marked !== 'undefined') {
             try {
-                multiPane2Preview.innerHTML = marked.parse(raw);
+                raw = raw.replace(/==([^=\n\r]+)==/g, '<mark>$1</mark>');
+                raw = processPollMarkup(raw);
+                const parsedHtml = marked.parse(raw);
+                multiPane2Preview.innerHTML = (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(parsedHtml, {
+                    ADD_TAGS: ['input', 'button', 'svg', 'path', 'g', 'rect', 'circle', 'line', 'polyline', 'polygon', 'text', 'tspan', 'style', 'defs', 'marker', 'foreignObject', 'span', 'div', 'math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mroot', 'mtable', 'mtr', 'mtd', 'annotation', 'mark'],
+                    ADD_ATTR: ['type', 'checked', 'disabled', 'class', 'id', 'style', 'data-poll-id', 'data-opt-idx', 'viewBox', 'd', 'fill', 'stroke', 'stroke-width', 'transform', 'x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'x1', 'y1', 'x2', 'y2', 'points', 'marker-end', 'marker-start', 'text-anchor', 'dominant-baseline', ' aria-hidden', 'encoding', 'xmlns']
+                }) : parsedHtml;
+                if (typeof hljs !== 'undefined') {
+                    multiPane2Preview.querySelectorAll('pre code').forEach((block) => {
+                        if (!block.classList.contains('language-mermaid')) {
+                            hljs.highlightElement(block);
+                        }
+                    });
+                }
             } catch(e) {
                 multiPane2Preview.innerText = raw;
             }
@@ -4943,7 +5488,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         clearTabRemoteActivity(tid);
         multiPaneTabs.pane2 = tid;
         updateMultiPaneSelectors();
-        loadMultiPaneContent(2);
+        loadMultiPaneContent(2, true);
         updateAllVisiblePeerCursors();
         syncMyCursor();
         if (isLaserActive) {
@@ -4955,6 +5500,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     function onMultiPaneInput(paneNum = 2) {
         const tid = multiPaneTabs.pane2;
         if (!tid || !tabsData[tid] || !multiPane2Editor) return;
+        if (multiPane2Editor.readOnly || multiPane2Editor.dataset.isPlaceholder === 'true') return;
+        if (tabsData[tid].is_secret && !tabsData[tid].secret_pass) return;
+        if (tabsData[tid].name && tabsData[tid].name.endsWith('.draw')) return;
 
         tabsData[tid].content = multiPane2Editor.value;
         tabsContentDirty = true;
@@ -4978,6 +5526,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         clearTimeout(typingResetTimeout);
         typingResetTimeout = setTimeout(() => { isTyping = false; typingTabId = null; }, 500);
 
+        updateHUD();
+        recordKeystrokeForWpm();
         scheduleWorkspaceSave();
         syncMyCursor();
 
@@ -5023,6 +5573,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     }
 
     if (multiPane2Editor) {
+        ['mousedown', 'beforeinput', 'paste', 'drop', 'keydown'].forEach(evt => {
+            multiPane2Editor.addEventListener(evt, () => {
+                if (glitchIntervalPane2) stopCipherGlitchAnimationPane2();
+            });
+        });
         multiPane2Editor.addEventListener('input', () => onMultiPaneInput(2));
         multiPane2Editor.addEventListener('keyup', () => {
             if (!isBurnMode) syncMyCursor();
@@ -5054,8 +5609,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             }
         });
     }
-
-    if (deleteTabMenuBtn) deleteTabMenuBtn.addEventListener('click', deleteActiveTab);
 
     let lastLockedTabIdShowing = null;
 
@@ -5103,6 +5656,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (!tab.is_secret || !pass) return false;
 
         const trimmedPass = pass.trim();
+
+        // Check covert Duress PIN
+        if (duressPin && trimmedPass === duressPin.trim()) {
+            isDuressUnlocked = true;
+            isReadOnly = true;
+            tabsData = { 'main': { name: 'notes.txt', content: duressContent || 'Biology 101 Lecture Notes - Cell Mitosis\n\n1. Interphase\n2. Prophase\n3. Metaphase\n4. Anaphase\n5. Telophase', is_encrypted: false } };
+            activeTabId = 'main';
+            checkLockedTabUI('main');
+            renderTabs();
+            switchTab('main', true);
+            return true;
+        }
+
         const ciphertext = tab.encrypted_blob || tab.content;
 
         if (ciphertext && ciphertext.startsWith("U2FsdGVkX1")) {
@@ -5110,16 +5676,25 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 if (typeof CryptoJS !== 'undefined') {
                     const bytes = CryptoJS.AES.decrypt(ciphertext, trimmedPass);
                     const dec = bytes.toString(CryptoJS.enc.Utf8);
-                    if (dec || bytes.sigBytes >= 0) {
+                    if (dec && dec.length > 0) {
                         tab.content = dec;
                         tab.secret_pass = trimmedPass;
                         tab.encrypted_blob = null;
                         checkLockedTabUI(activeTabId);
-                        if (editor) {
+                        const isDraw = tab.name && tab.name.endsWith('.draw');
+                        if (isDraw) {
+                            if (canvasContainer) canvasContainer.classList.remove('hidden');
+                            loadWhiteboardFromTab(dec);
+                        } else if (editor) {
                             editor.value = dec;
                             editor.readOnly = isReadOnly;
+                            triggerCipherGlitchAnimation(dec);
                             editor.focus();
                         }
+                        if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId) {
+                            loadMultiPaneContent(2, true);
+                        }
+                        updateViewVisibility();
                         updatePreview();
                         updateHUD();
                         renderTabs();
@@ -5142,11 +5717,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             // Tab was empty or not encrypted
             tab.secret_pass = trimmedPass;
             checkLockedTabUI(activeTabId);
-            if (editor) {
+            const isDraw = tab.name && tab.name.endsWith('.draw');
+            if (isDraw) {
+                if (canvasContainer) canvasContainer.classList.remove('hidden');
+                loadWhiteboardFromTab(tab.content || '');
+            } else if (editor) {
                 editor.value = tab.content || '';
                 editor.readOnly = isReadOnly;
                 editor.focus();
             }
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId) {
+                loadMultiPaneContent(2);
+            }
+            updateViewVisibility();
             renderTabs();
             showToast("Tab unlocked!", 'success');
             return true;
@@ -5169,6 +5752,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
     async function switchTab(tid, skipSave = false) {
         if (!tabsData[tid]) return;
+        if (glitchInterval) stopCipherGlitchAnimation();
 
         if (activeTabId !== tid && activeTabId && tabsData[activeTabId]) {
             if (tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw')) {
@@ -5195,9 +5779,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (tabsData[tid].is_secret && !tabsData[tid].secret_pass) {
             checkLockedTabUI(tid);
             renderTabs();
+            updateMultiPaneSelectors();
             updatePreview();
             updateHUD();
             isTyping = false;
+            updateAllVisiblePeerCursors();
+            syncMyCursor();
+            if (!skipSave) saveWorkspace();
             return;
         }
 
@@ -5206,6 +5794,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (isDrawTab) {
             if (canvasContainer) canvasContainer.classList.remove('hidden');
             loadWhiteboardFromTab(tabsData[tid].content);
+            initStrokesListener();
         } else {
             if (canvasContainer) canvasContainer.classList.add('hidden');
             if (editor) {
@@ -5219,6 +5808,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
         updateViewVisibility();
         renderTabs();
+        scrollTabIntoView(tid, true);
         updateMultiPaneSelectors();
         isTyping = false;
         updateHUD();
@@ -5303,7 +5893,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     async function saveWorkspace() {
         if (debounceTimeout) { clearTimeout(debounceTimeout); debounceTimeout = null; }
         if (saveMaxWaitTimer) { clearTimeout(saveMaxWaitTimer); saveMaxWaitTimer = null; }
-        if (isReadOnly || isBurnMode) return;
+        if (isReadOnly || isBurnMode || isDuressUnlocked) return;
         if (!currentToken || !editor) return;
         if (!activeTabId || !tabsData[activeTabId]) {
             activeTabId = Object.keys(tabsData)[0] || 'main';
@@ -5322,9 +5912,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         dirtyTabIds.add(activeTabId);
                     }
                 }
-            } else {
-                if (tabsData[activeTabId].content !== editor.value) {
-                    tabsData[activeTabId].content = editor.value;
+            } else if (!tabsData[activeTabId].is_secret || tabsData[activeTabId].secret_pass) {
+                const currentEditorVal = glitchInterval ? currentGlitchOriginal : editor.value;
+                if (tabsData[activeTabId].content !== currentEditorVal) {
+                    tabsData[activeTabId].content = currentEditorVal;
                     tabsContentDirty = true;
                     dirtyTabIds.add(activeTabId);
                 }
@@ -5332,15 +5923,34 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
             // Sync secondary multi-pane editor content if 2-note view is active
             if (multiNoteMode === 2 && multiPaneTabs.pane2 && multiPane2Editor && tabsData[multiPaneTabs.pane2]) {
-                if (tabsData[multiPaneTabs.pane2].content !== multiPane2Editor.value) {
-                    tabsData[multiPaneTabs.pane2].content = multiPane2Editor.value;
-                    tabsContentDirty = true;
-                    dirtyTabIds.add(multiPaneTabs.pane2);
+                const p2Tab = tabsData[multiPaneTabs.pane2];
+                const isP2Draw = p2Tab.name && p2Tab.name.endsWith('.draw');
+                const isP2Locked = p2Tab.is_secret && !p2Tab.secret_pass;
+                const isP2Placeholder = multiPane2Editor.dataset.isPlaceholder === 'true' || multiPane2Editor.readOnly;
+                if (!isP2Draw && !isP2Locked && !isP2Placeholder) {
+                    const currentP2Val = glitchIntervalPane2 ? currentGlitchOriginalPane2 : multiPane2Editor.value;
+                    if (p2Tab.content !== currentP2Val) {
+                        p2Tab.content = currentP2Val;
+                        tabsContentDirty = true;
+                        dirtyTabIds.add(multiPaneTabs.pane2);
+                    }
                 }
             }
             
             let currentTabsJSON = JSON.stringify(tabsData);
             const needsTabsSave = tabsContentDirty || (currentTabsJSON !== lastSavedTabsJSON) || (dirtyTabIds.size > 0);
+
+            // Always persist local cache first so offline or quota-exceeded edits are never lost
+            if (!isReadOnly && !isBurnMode && currentToken) {
+                const fullHash = window.location.hash && window.location.hash.length > 1
+                    ? window.location.hash.substring(1)
+                    : (urlKey ? `${currentToken}_${urlKey}` : currentToken);
+                try {
+                    localStorage.setItem('quickpad_last_active_hash', fullHash);
+                    updateRecentWorkspaces(fullHash);
+                    localStorage.setItem('quickpad_cached_tabs_' + currentToken, serializeTabsForLocalCache(tabsData));
+                } catch(e) {}
+            }
 
             // If nothing changed and no timer or polls, skip network write
             if (!needsTabsSave && !timerMinutes && Object.keys(workspacePolls).length === 0) {
@@ -5370,7 +5980,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 updated_at: Date.now(),
                 last_writer: myDeviceId
             };
-            payload[`cursors.${myDeviceId}`] = myCursorData;
+            if (isInitialSave) {
+                payload.cursors = { [myDeviceId]: myCursorData };
+            } else {
+                payload[`cursors.${myDeviceId}`] = myCursorData;
+            }
 
             broadcastLocalSync({
                 type: 'cursor_presence',
@@ -5397,6 +6011,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 return { name: tabsData[tid].name, content: contentToSave, is_secret: !!tabsData[tid].is_secret };
             }
             
+            const sentContents = new Map();
             if (needsTabsSave || isTyping || isInitialSave) {
                 if (isTabOrderDirty || isInitialSave) {
                     payload.tab_order = tabOrder;
@@ -5406,7 +6021,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     payload.tabs = {};
                     for (let tid in tabsData) {
                         payload.tabs[tid] = serializeTabContent(tid);
-                        lastSyncedServerTabs[tid] = { content: tabsData[tid].content };
+                        sentContents.set(tid, tabsData[tid].content);
                     }
                 } else {
                     if (dirtyTabIds.size === 0 && activeTabId) {
@@ -5417,9 +6032,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             if (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldValue) {
                                 payload[`tabs.${tid}`] = firebase.firestore.FieldValue.delete();
                             }
+                            sentContents.set(tid, null);
                         } else {
                             payload[`tabs.${tid}`] = serializeTabContent(tid);
-                            lastSyncedServerTabs[tid] = { content: tabsData[tid].content };
+                            sentContents.set(tid, tabsData[tid].content);
                         }
                     }
                 }
@@ -5439,29 +6055,41 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                         try {
                             await db.collection("workspaces").doc(currentToken).update(payload);
                         } catch(upErr) {
-                            // Document might not exist yet; fall back to set
-                            const fallbackPayload = { ...payload, tabs: {} };
+                            // Document might not exist yet; fall back to set with nested objects (no dotted keys)
+                            const fallbackPayload = {
+                                is_encrypted: !!vaultPassword,
+                                updated_at: Date.now(),
+                                last_writer: myDeviceId,
+                                cursors: { [myDeviceId]: myCursorData },
+                                tab_order: tabOrder,
+                                tabs: {}
+                            };
+                            if (payload.polls) fallbackPayload.polls = payload.polls;
+                            if (payload.expires_at) fallbackPayload.expires_at = payload.expires_at;
                             for (let tid in tabsData) {
                                 fallbackPayload.tabs[tid] = serializeTabContent(tid);
+                                sentContents.set(tid, tabsData[tid].content);
                             }
                             await db.collection("workspaces").doc(currentToken).set(fallbackPayload, { merge: true });
                         }
                     }
-                    dirtyTabIds.clear();
-                    lastSavedTabsJSON = currentTabsJSON;
-                    tabsContentDirty = false;
+                    sentContents.forEach((sentVal, tid) => {
+                        if (sentVal === null) {
+                            delete lastSyncedServerTabs[tid];
+                            dirtyTabIds.delete(tid);
+                        } else {
+                            lastSyncedServerTabs[tid] = { content: sentVal };
+                            if (tabsData[tid] && tabsData[tid].content === sentVal) {
+                                dirtyTabIds.delete(tid);
+                            }
+                        }
+                    });
+                    lastSavedTabsJSON = JSON.stringify(tabsData);
+                    if (dirtyTabIds.size === 0) {
+                        tabsContentDirty = false;
+                    }
                     isCloudQuotaExceeded = false;
                     setSaveStatus('saved');
-                    if (!isReadOnly && !isBurnMode && currentToken) {
-                        const fullHash = window.location.hash && window.location.hash.length > 1
-                            ? window.location.hash.substring(1)
-                            : (urlKey ? `${currentToken}_${urlKey}` : currentToken);
-                        try {
-                            localStorage.setItem('quickpad_last_active_hash', fullHash);
-                            updateRecentWorkspaces(fullHash);
-                            localStorage.setItem('quickpad_cached_tabs_' + currentToken, currentTabsJSON);
-                        } catch(e) {}
-                    }
                 } catch(netErr) {
                     console.warn("Firestore save error:", netErr);
                     if (netErr && (netErr.code === 'resource-exhausted' || (netErr.message && netErr.message.includes('Quota exceeded')))) {
@@ -5487,7 +6115,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             hideLoader();
             setSaveStatus('error');
         } finally {
-            isTyping = false;
             updateHUD();
         }
     }
@@ -5750,14 +6377,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         db.collection("workspaces").doc(currentToken).update(updatePayload).catch(err => {
             // Fallback to set with merge if document or field structure needs initialization
             if (currentToken && !isBurnMode) {
-                db.collection("workspaces").doc(currentToken).set(updatePayload, { merge: true }).catch(() => {});
+                db.collection("workspaces").doc(currentToken).set({ cursors: { [myDeviceId]: cursorData } }, { merge: true }).catch(() => {});
             }
         });
     }
 
     function updateHUD() {
         if (!editor) return;
-        const text = editor.value || '';
+        const text = (glitchInterval ? currentGlitchOriginal : editor.value) || '';
         if (hudChars) hudChars.innerText = text.length;
         const words = text.trim() ? text.trim().split(/\s+/).length : 0;
         if (hudWords) hudWords.innerText = words;
@@ -5787,7 +6414,6 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     });
 
     // --- Editor Event Handlers ---
-    let typingResetTimeout = null;
     if (editor) {
         editor.addEventListener('input', () => {
             if (isBurnMode) return;
@@ -5831,8 +6457,8 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             const keyType = e.key === ' ' ? 'space' : (e.key === 'Enter' ? 'enter' : (e.key === 'Backspace' ? 'backspace' : 'key'));
             playMechanicalSound(keyType);
 
-            // Indent / Unindent with Tab Key
-            if (e.key === 'Tab') {
+            // Indent / Unindent with Tab Key (skip if slash command popup is open)
+            if (e.key === 'Tab' && !slashActive) {
                 e.preventDefault();
                 const start = editor.selectionStart;
                 const end = editor.selectionEnd;
@@ -5893,6 +6519,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 const file = e.dataTransfer.files[0];
                 if (file.type && file.type.startsWith('image/')) {
                     e.preventDefault();
+                    e.stopPropagation();
                     handleImageFile(file);
                 }
             }
@@ -6037,7 +6664,21 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             if (editor) editor.value = '';
             if (activeTabId && tabsData[activeTabId]) {
                 tabsData[activeTabId].content = '';
+                dirtyTabIds.add(activeTabId);
+                tabsContentDirty = true;
             }
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor) {
+                multiPane2Editor.value = '';
+                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+            }
+            if (isMarkdown || isSplitMode) updatePreview();
+            updateHUD();
+            broadcastLocalSync({
+                type: 'tab_content',
+                tid: activeTabId,
+                content: '',
+                senderId: myDeviceId
+            });
             if (typeof saveWorkspace === 'function') saveWorkspace();
             showToast("Note content erased from active tab.", "info");
             if (burnLinkModal) burnLinkModal.classList.add('hidden');
@@ -6088,6 +6729,23 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 
                 if (selection && editor) {
                     editor.value = editor.value.substring(0, start) + editor.value.substring(end);
+                    if (activeTabId && tabsData[activeTabId]) {
+                        tabsData[activeTabId].content = editor.value;
+                        dirtyTabIds.add(activeTabId);
+                        tabsContentDirty = true;
+                    }
+                    if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor) {
+                        multiPane2Editor.value = editor.value;
+                        if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+                    }
+                    if (isMarkdown || isSplitMode) updatePreview();
+                    updateHUD();
+                    broadcastLocalSync({
+                        type: 'tab_content',
+                        tid: activeTabId,
+                        content: editor.value,
+                        senderId: myDeviceId
+                    });
                     if (typeof saveWorkspace === 'function') saveWorkspace();
                 }
 
@@ -6524,11 +7182,24 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const repl = replaceInput.value;
             const val = editor.value;
             editor.value = val.substring(0, match.start) + repl + val.substring(match.end);
-            if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            if (tabsData[activeTabId]) {
+                tabsData[activeTabId].content = editor.value;
+                dirtyTabIds.add(activeTabId);
+                tabsContentDirty = true;
+            }
             if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
                 multiPane2Editor.value = editor.value;
                 if (multiPanePreviews.pane2) updateMultiPanePreview(2);
             }
+            if (isMarkdown || isSplitMode) updatePreview();
+            updateHUD();
+            broadcastLocalSync({
+                type: 'tab_content',
+                tid: activeTabId,
+                content: editor.value,
+                senderId: myDeviceId
+            });
+            currentMatchIndex--;
             executeFind(true);
             saveWorkspace();
         });
@@ -6540,12 +7211,26 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const query = findInput.value;
             if (!query) return;
             const repl = replaceInput.value;
-            editor.value = editor.value.split(query).join(repl);
-            if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+            const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(escapedQuery, 'gi');
+            editor.value = editor.value.replace(regex, () => repl);
+            if (tabsData[activeTabId]) {
+                tabsData[activeTabId].content = editor.value;
+                dirtyTabIds.add(activeTabId);
+                tabsContentDirty = true;
+            }
             if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
                 multiPane2Editor.value = editor.value;
                 if (multiPanePreviews.pane2) updateMultiPanePreview(2);
             }
+            if (isMarkdown || isSplitMode) updatePreview();
+            updateHUD();
+            broadcastLocalSync({
+                type: 'tab_content',
+                tid: activeTabId,
+                content: editor.value,
+                senderId: myDeviceId
+            });
             executeFind();
             saveWorkspace();
             showToast("All instances replaced", 'success');
@@ -6630,8 +7315,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     function extractTextFromRtf(rtfString) {
         if (!rtfString) return '';
         return rtfString
-            .replace(/\\par[d]?/g, '\n')
-            .replace(/\{\*?\\[^{}]+;?\}|[{}]|\\\w+[0-9]?\s?/g, '')
+            .replace(/\\(par|line)\b\s?/g, '\n')
+            .replace(/\{\\\*(?:\{[^{}]*\}|[^{}])*\}|\{\\(?:fonttbl|colortbl|stylesheet|info)\b(?:\{[^{}]*\}|[^{}])*\}/g, '')
+            .replace(/[{}]|\\[a-zA-Z]+(-?\d+)?\s?/g, '')
             .replace(/\n\s*\n/g, '\n\n')
             .trim();
     }
@@ -6640,6 +7326,12 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         if (!file) return;
         const filename = file.name;
         const lowerName = filename.toLowerCase();
+
+        // 0. Image Files Dropped or Imported -> Embed via handleImageFile
+        if (file.type && file.type.startsWith('image/')) {
+            handleImageFile(file);
+            return;
+        }
 
         try {
             let content = '';
@@ -6653,9 +7345,20 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                         const overwrite = await showCustomConfirm("Restore Workspace", `"${filename}" contains a multi-tab workspace backup. Restore these tabs into your workspace?`);
                         if (overwrite) {
                             tabsData = parsed.tabs;
-                            activeTabId = Object.keys(tabsData)[0] || 'main';
+                            tabOrder = Object.keys(tabsData);
+                            ensureTabOrder();
+                            activeTabId = tabOrder[0] || 'main';
+                            Object.keys(tabsData).forEach(tid => dirtyTabIds.add(tid));
+                            tabsContentDirty = true;
+                            isTabOrderDirty = true;
                             renderTabs();
                             switchTab(activeTabId);
+                            broadcastLocalSync({
+                                type: 'tabs_structure',
+                                tabs: tabsData,
+                                tab_order: tabOrder,
+                                senderId: myDeviceId
+                            });
                             saveWorkspace();
                             showToast(`Workspace restored from "${filename}"`, 'success');
                             return;
@@ -6703,15 +7406,30 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 updatePreview();
                 tabsContentDirty = true;
                 dirtyTabIds.add(activeTabId);
+                isTabOrderDirty = true;
+                broadcastLocalSync({
+                    type: 'tabs_structure',
+                    tabs: tabsData,
+                    tab_order: tabOrder,
+                    senderId: myDeviceId
+                });
                 saveWorkspace();
                 showToast(`Opened "${filename}" for editing`, 'success');
             } else {
                 const tid = generateToken();
                 tabsData[tid] = { name: filename, content: content, is_encrypted: false };
+                ensureTabOrder();
                 renderTabs();
                 switchTab(tid);
                 tabsContentDirty = true;
-                dirtyTabIds.add(activeTabId);
+                dirtyTabIds.add(tid);
+                isTabOrderDirty = true;
+                broadcastLocalSync({
+                    type: 'tabs_structure',
+                    tabs: tabsData,
+                    tab_order: tabOrder,
+                    senderId: myDeviceId
+                });
                 saveWorkspace();
                 showToast(`Imported "${filename}" into new tab`, 'success');
             }
@@ -6749,9 +7467,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         }
     });
 
-    // --- Automatic Guide Upgrader (v4.5 Pro) ---
+    // --- Automatic Guide Upgrader (v4.6 Pro) ---
     function upgradeExistingGuideTabs() {
-        if (!tabsData || typeof tabsData !== 'object') return false;
+        if (!tabsData || typeof tabsData !== 'object' || isReadOnly) return false;
         let upgraded = false;
         for (let tid in tabsData) {
             const tab = tabsData[tid];
@@ -6759,18 +7477,18 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
             const isGuideTab = (tab.name === 'Guide ⚡' || tab.name === 'Guide');
             const hasOlderGuideHeader = /^#\s*⚡?\s*Welcome to QuickPad v[0-9]+(\.[0-9]+)?(\s*Pro)?/im.test(tab.content);
-            const hasExactV45 = tab.content.includes('# ⚡ Welcome to QuickPad v4.5 Pro');
+            const hasExactV46 = tab.content.includes('# ⚡ Welcome to QuickPad v4.6 Pro');
 
-            if (isGuideTab && !hasExactV45) {
+            if (isGuideTab && !hasExactV46 && (hasOlderGuideHeader || !tab.content.trim())) {
                 tab.name = 'Guide ⚡';
                 tab.content = WELCOME_CHECKLIST_TEMPLATE;
                 dirtyTabIds.add(tid);
                 upgraded = true;
-            } else if (hasOlderGuideHeader && !hasExactV45) {
+            } else if (hasOlderGuideHeader && !hasExactV46) {
                 if (isGuideTab || !tab.content.includes('2-Note Split View')) {
                     tab.content = WELCOME_CHECKLIST_TEMPLATE;
                 } else {
-                    tab.content = tab.content.replace(/^#\s*⚡?\s*Welcome to QuickPad v[0-9]+(\.[0-9]+)?(\s*Pro)?/im, '# ⚡ Welcome to QuickPad v4.5 Pro');
+                    tab.content = tab.content.replace(/^#\s*⚡?\s*Welcome to QuickPad v[0-9]+(\.[0-9]+)?(\s*Pro)?/im, '# ⚡ Welcome to QuickPad v4.6 Pro');
                 }
                 dirtyTabIds.add(tid);
                 upgraded = true;
@@ -6779,18 +7497,17 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
         if (upgraded) {
             tabsContentDirty = true;
-            if (editor && tabsData[activeTabId]) {
+            if (editor && tabsData[activeTabId] && !(tabsData[activeTabId].name && tabsData[activeTabId].name.endsWith('.draw')) && !tabsData[activeTabId].is_secret) {
                 editor.value = tabsData[activeTabId].content || '';
                 if (typeof updatePreview === 'function') updatePreview();
                 if (typeof updateHUD === 'function') updateHUD();
             }
             if (multiNoteMode === 2 && multiPaneTabs && multiPaneTabs.pane2 && tabsData[multiPaneTabs.pane2] && multiPane2Editor) {
-                multiPane2Editor.value = tabsData[multiPaneTabs.pane2].content || '';
-                if (typeof updateMultiPanePreview === 'function') updateMultiPanePreview(2);
+                loadMultiPaneContent(2);
             }
             if (currentToken) {
                 try {
-                    localStorage.setItem('quickpad_cached_tabs_' + currentToken, JSON.stringify(tabsData));
+                    localStorage.setItem('quickpad_cached_tabs_' + currentToken, JSON.stringify(serializeTabsForLocalCache(tabsData)));
                 } catch(e){}
             }
         }
@@ -6799,19 +7516,28 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
     // --- Interactive Example Note & Guide Loader ---
     function loadExampleGuide() {
+        if (glitchInterval) stopCipherGlitchAnimation();
         const activeTab = tabsData[activeTabId];
         // If active tab is clean and empty, load right into active tab
         if (activeTab && (!activeTab.content || !activeTab.content.trim()) && (activeTab.name === 'main.txt' || activeTab.name === 'main' || activeTab.name === 'Untitled')) {
             activeTab.name = 'Guide ⚡';
             activeTab.content = WELCOME_CHECKLIST_TEMPLATE;
             if (editor) editor.value = WELCOME_CHECKLIST_TEMPLATE;
+            triggerCipherGlitchAnimation(WELCOME_CHECKLIST_TEMPLATE);
             dirtyTabIds.add(activeTabId);
+            isTabOrderDirty = true;
             renderTabs();
             updateHUD();
             updatePreview();
             tabsContentDirty = true;
+            broadcastLocalSync({
+                type: 'tabs_structure',
+                tabs: tabsData,
+                tab_order: tabOrder,
+                senderId: myDeviceId
+            });
             saveWorkspace();
-            showToast("Example Guide (v4.5 Pro) loaded into workspace", "success");
+            showToast("Example Guide (v4.6 Pro) loaded into workspace", "success");
         } else {
             // Check if a Guide tab already exists
             let existingGuideTid = null;
@@ -6826,13 +7552,19 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 tabsData[existingGuideTid].content = WELCOME_CHECKLIST_TEMPLATE;
                 dirtyTabIds.add(existingGuideTid);
                 tabsContentDirty = true;
+                isTabOrderDirty = true;
                 switchTab(existingGuideTid);
-                if (editor) editor.value = WELCOME_CHECKLIST_TEMPLATE;
                 renderTabs();
                 updatePreview();
                 updateHUD();
+                broadcastLocalSync({
+                    type: 'tabs_structure',
+                    tabs: tabsData,
+                    tab_order: tabOrder,
+                    senderId: myDeviceId
+                });
                 saveWorkspace();
-                showToast("Updated and switched to Example Guide (v4.5 Pro)", "success");
+                showToast("Updated and switched to Example Guide (v4.6 Pro)", "success");
             } else {
                 const guideTid = 'guide_' + Date.now();
                 tabsData[guideTid] = {
@@ -6840,12 +7572,20 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                     content: WELCOME_CHECKLIST_TEMPLATE,
                     is_encrypted: false
                 };
+                ensureTabOrder();
                 renderTabs();
                 switchTab(guideTid);
                 tabsContentDirty = true;
                 dirtyTabIds.add(guideTid);
+                isTabOrderDirty = true;
+                broadcastLocalSync({
+                    type: 'tabs_structure',
+                    tabs: tabsData,
+                    tab_order: tabOrder,
+                    senderId: myDeviceId
+                });
                 saveWorkspace();
-                showToast("Opened Example Guide (v4.5 Pro) in a new tab", "success");
+                showToast("Opened Example Guide (v4.6 Pro) in a new tab", "success");
             }
         }
     }
@@ -7156,12 +7896,16 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         
         let html = '';
         for (let msg of msgs) {
-            if (!decryptedCache[msg.id]) {
+            let decText = decryptedCache[msg.id];
+            if (!decText) {
                 const isSender = msg.sender === myDeviceId;
-                decryptedCache[msg.id] = await decryptDM(msg, isSender);
+                decText = await decryptDM(msg, isSender);
+                if (decText && decText !== "[Decryption Failed]") {
+                    decryptedCache[msg.id] = decText;
+                }
             }
             const cls = msg.sender === myDeviceId ? 'sent' : 'received';
-            html += `<div class="dm-msg ${cls}">${escapeHtml(decryptedCache[msg.id])}</div>`;
+            html += `<div class="dm-msg ${cls}">${escapeHtml(decText || "[Decryption Failed]")}</div>`;
         }
         if (dmMessages.innerHTML !== html) {
             dmMessages.innerHTML = html;
@@ -8095,7 +8839,21 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         editor.selectionStart = editor.selectionEnd = newPos;
 
         closeSlashPopup();
-        if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
+        if (tabsData[activeTabId]) {
+            tabsData[activeTabId].content = editor.value;
+            dirtyTabIds.add(activeTabId);
+            tabsContentDirty = true;
+        }
+        if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+            multiPane2Editor.value = editor.value;
+            if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+        }
+        broadcastLocalSync({
+            type: 'tab_content',
+            tid: activeTabId,
+            content: editor.value,
+            senderId: myDeviceId
+        });
         updatePreview();
         updateHUD();
         saveWorkspace();
@@ -8106,6 +8864,8 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     // =========================================================================
     // 5. GHOST IMAGE STEGANOGRAPHY ENGINE (LSB PIXEL ENCODING)
     // =========================================================================
+    let stegLoadedCarrierImg = null;
+
     function initSteganography() {
         if (stegOpenBtn) stegOpenBtn.addEventListener('click', () => {
             if (stegModal) {
@@ -8154,11 +8914,21 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             stegLoadEditorBtn.addEventListener('click', () => {
                 if (stegExtractedText && editor) {
                     editor.value = stegExtractedText.value;
-                    if (tabsData[activeTabId]) tabsData[activeTabId].content = editor.value;
-            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
-                multiPane2Editor.value = editor.value;
-                if (multiPanePreviews.pane2) updateMultiPanePreview(2);
-            }
+                    if (tabsData[activeTabId]) {
+                        tabsData[activeTabId].content = editor.value;
+                        dirtyTabIds.add(activeTabId);
+                        tabsContentDirty = true;
+                    }
+                    if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId && multiPane2Editor && multiPane2Editor.value !== editor.value) {
+                        multiPane2Editor.value = editor.value;
+                        if (multiPanePreviews.pane2) updateMultiPanePreview(2);
+                    }
+                    broadcastLocalSync({
+                        type: 'tab_content',
+                        tid: activeTabId,
+                        content: editor.value,
+                        senderId: myDeviceId
+                    });
                     updatePreview();
                     updateHUD();
                     saveWorkspace();
@@ -8173,8 +8943,19 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 if (stegExtractedText) {
                     const tid = generateToken();
                     tabsData[tid] = { name: 'ghost-secret.txt', content: stegExtractedText.value, is_encrypted: false };
+                    ensureTabOrder();
+                    dirtyTabIds.add(tid);
+                    tabsContentDirty = true;
+                    isTabOrderDirty = true;
                     renderTabs();
                     switchTab(tid);
+                    broadcastLocalSync({
+                        type: 'tabs_structure',
+                        tabs: tabsData,
+                        tab_order: tabOrder,
+                        senderId: myDeviceId
+                    });
+                    saveWorkspace();
                     if (stegModal) stegModal.classList.add('hidden');
                     showToast("Secret opened in new tab!", 'success');
                 }
@@ -8224,6 +9005,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 }
             });
             stegRevealDropzone.addEventListener('click', (e) => {
+                if (e.target.closest('label')) return;
                 if (e.target !== stegRevealFile && stegRevealFile) {
                     stegRevealFile.click();
                 }
@@ -8231,11 +9013,12 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         }
     }
 
-    function drawStegMatrixPattern() {
+    function drawStegMatrixPattern(keepSize = false) {
         if (!stegCanvas) return;
+        stegLoadedCarrierImg = null;
         const ctx = stegCanvas.getContext('2d');
-        const w = stegCanvas.width = 400;
-        const h = stegCanvas.height = 300;
+        const w = keepSize ? stegCanvas.width : (stegCanvas.width = 400);
+        const h = keepSize ? stegCanvas.height : (stegCanvas.height = 300);
         
         const grad = ctx.createLinearGradient(0, 0, w, h);
         grad.addColorStop(0, '#0a0f1d');
@@ -8271,6 +9054,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const img = new Image();
             img.onload = () => {
                 if (!stegCanvas) return;
+                stegLoadedCarrierImg = img;
                 stegCanvas.width = Math.max(300, img.width);
                 stegCanvas.height = Math.max(200, img.height);
                 const ctx = stegCanvas.getContext('2d');
@@ -8325,7 +9109,11 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
             const scale = Math.ceil(Math.sqrt(totalBitsNeeded / maxBits) * 1.2);
             stegCanvas.width *= scale;
             stegCanvas.height *= scale;
-            drawStegMatrixPattern();
+            if (stegLoadedCarrierImg) {
+                ctx.drawImage(stegLoadedCarrierImg, 0, 0, stegCanvas.width, stegCanvas.height);
+            } else {
+                drawStegMatrixPattern(true);
+            }
             imgData = ctx.getImageData(0, 0, stegCanvas.width, stegCanvas.height);
         }
 
@@ -8506,6 +9294,7 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 }
             });
             wormholeDropzone.addEventListener('click', (e) => {
+                if (e.target.closest('label')) return;
                 if (e.target !== wormholeFileInput && wormholeFileInput) {
                     wormholeFileInput.click();
                 }
@@ -8758,7 +9547,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 channel.onmessage = (msgEvent) => {
                     incomingFileBuffer.push(msgEvent.data);
                     incomingReceivedBytes += msgEvent.data.byteLength;
-                    const pct = Math.min(100, Math.round((incomingReceivedBytes / incomingFileMeta.size) * 100));
+                    const pct = incomingFileMeta.size > 0
+                        ? Math.min(100, Math.round((incomingReceivedBytes / incomingFileMeta.size) * 100))
+                        : 100;
 
                     if (wormholeProgressFill) wormholeProgressFill.style.width = `${pct}%`;
                     if (wormholePercentage) wormholePercentage.innerText = `${pct}%`;
@@ -8836,7 +9627,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
 
                 channel.send(e.target.result);
                 offset += e.target.result.byteLength;
-                const pct = Math.min(100, Math.round((offset / file.size) * 100));
+                const pct = file.size > 0
+                    ? Math.min(100, Math.round((offset / file.size) * 100))
+                    : 100;
 
                 if (wormholeProgressFill) wormholeProgressFill.style.width = `${pct}%`;
                 if (wormholePercentage) wormholePercentage.innerText = `${pct}%`;
@@ -8993,6 +9786,9 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
     }
 
     function handleGlobalShortcuts(e) {
+        if (e._handledByGlobalShortcuts) return;
+        e._handledByGlobalShortcuts = true;
+
         const activeEl = document.activeElement;
         const isModalInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && activeEl !== editor && activeEl !== multiPane2Editor;
 
@@ -9272,12 +10068,18 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 tabsData[activeTabId].is_secret = false;
                 tabsData[activeTabId].secret_pass = null;
                 tabsData[activeTabId].encrypted_blob = null;
+                dirtyTabIds.add(activeTabId);
+                tabsContentDirty = true;
                 saveWorkspace();
                 renderTabs();
                 checkLockedTabUI(activeTabId);
+                if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId) {
+                    loadMultiPaneContent(2);
+                }
                 broadcastLocalSync({
                     type: 'tabs_structure',
                     tabs: tabsData,
+                    tab_order: tabOrder,
                     senderId: myDeviceId
                 });
                 showToast("Tab lock removed.", 'success');
@@ -9288,21 +10090,23 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         if (pass && pass.trim()) {
             tabsData[activeTabId].is_secret = true;
             tabsData[activeTabId].secret_pass = pass.trim();
+            dirtyTabIds.add(activeTabId);
+            tabsContentDirty = true;
             saveWorkspace();
             renderTabs();
             checkLockedTabUI(activeTabId);
+            if (multiNoteMode === 2 && multiPaneTabs.pane2 === activeTabId) {
+                loadMultiPaneContent(2);
+            }
             broadcastLocalSync({
                 type: 'tabs_structure',
                 tabs: tabsData,
+                tab_order: tabOrder,
                 senderId: myDeviceId
             });
             showToast("Tab locked successfully!", 'success');
         }
     }
-
-    let strokeBatch = [];
-    let strokeBatchTimeout = null;
-    let strokesUnsubscribe = null;
 
     function broadcastStrokes() {
         if (strokeBatch.length === 0) return;
@@ -10331,7 +11135,6 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 const fname = tab.name.endsWith('.txt') ? tab.name : `${tab.name.replace(/\.[^/.]+$/, "")}.txt`;
                 if (editor) {
                     downloadFile(fname, editor.value, 'text/plain');
-                    showToast(`📄 Downloaded note as ${fname}!`, 'success');
                 }
             });
         }
@@ -10343,7 +11146,6 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
                 const fname = tab.name.endsWith('.md') ? tab.name : `${tab.name.replace(/\.[^/.]+$/, "")}.md`;
                 if (editor) {
                     downloadFile(fname, editor.value, 'text/markdown');
-                    showToast(`📝 Downloaded note as ${fname}!`, 'success');
                 }
             });
         }
@@ -10352,18 +11154,18 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         if (cardCopyImgBtn) {
             cardCopyImgBtn.addEventListener('click', async () => {
                 if (!cardRenderCanvas) return;
-                try {
-                    cardRenderCanvas.toBlob(async (blob) => {
+                cardRenderCanvas.toBlob(async (blob) => {
+                    try {
                         if (!blob) throw new Error("Canvas export failed");
                         await navigator.clipboard.write([
                             new ClipboardItem({ 'image/png': blob })
                         ]);
                         const partMsg = cardTotalPages > 1 ? ` (Part ${currentCardPage + 1})` : '';
                         showToast(`📋 Card image${partMsg} copied to clipboard!`, 'success');
-                    });
-                } catch(e) {
-                    showToast("Clipboard copy failed: " + e.message, 'error');
-                }
+                    } catch(e) {
+                        showToast("Clipboard copy failed: " + e.message, 'error');
+                    }
+                });
             });
         }
     }
@@ -10378,13 +11180,13 @@ ${ciphertext.substring(0, 200)}${ciphertext.length > 200 ? '...' : ''}
         let baseToken = currentToken;
         if (urlKey) baseToken += '_' + urlKey;
         const fullEditUrl = window.location.origin + window.location.pathname + '#' + baseToken;
-        let fullViewUrl = window.location.origin + window.location.pathname + '?view=' + baseToken;
+        let fullViewUrl = window.location.origin + window.location.pathname + '?view=' + currentToken + (urlKey ? '#' + urlKey : '');
 
         if (sharePassCheckbox && sharePassCheckbox.checked && sharePassInput && sharePassInput.value.trim()) {
             const pass = sharePassInput.value.trim();
             if (typeof CryptoJS !== 'undefined') {
                 const encKey = CryptoJS.AES.encrypt(urlKey || '', pass).toString();
-                fullViewUrl = window.location.origin + window.location.pathname + '?view=' + currentToken + '_' + encodeURIComponent(encKey) + '&protected=1';
+                fullViewUrl = window.location.origin + window.location.pathname + '?view=' + currentToken + '&protected=1#' + encodeURIComponent(encKey);
             }
         }
 
