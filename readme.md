@@ -107,7 +107,7 @@ Because QuickPad uses strict **Zero-Knowledge Architecture**, your notes, files,
 
 - 🖥️ **Adaptive Multi-Stage Desktop Responsiveness:** Automatically collapses top menu buttons into sleek glass icon buttons and streamlines the bottom HUD into an ultra-clean 28px status bar with an interactive `⚡ Tools` dropup menu, ensuring tabs and notes have maximum breathing room with zero overflow.
 - 📲 **Fluid Horizontal Drag & Touch Navigation:** Both the top header menu/tabs and bottom Live HUD feature smooth drag-and-swipe horizontal scrolling with hidden scrollbars, optimized for smartphones, tablets, and desktops alike.
-- 📴 **Progressive Web App (PWA v117):** Full offline caching with Service Worker v117, background sync resilience, and installability to home screens on iOS, Android, macOS, and Windows.
+- 📴 **Progressive Web App (PWA v118):** Full offline caching with Service Worker v118, background sync resilience, and installability to home screens on iOS, Android, macOS, and Windows.
 - 🌗 **Split View & Markdown:** Side-by-side live Markdown preview with automated syntax highlighting via Highlight.js and interactive task list checkboxes.
 - 🔤 **Typography Controls:** Switch between Monospace (`Fira Code`), Sans-Serif (`Inter`), and Serif (`Lora`) typography with instant font size scaling (`A-` / `A+`).
 - 🎨 **Custom Themes & Screensaver:** 6 cyber neon themes, custom hex background picker, and customizable idle Matrix screensaver.

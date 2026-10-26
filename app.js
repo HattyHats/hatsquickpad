@@ -2,22 +2,107 @@
 (function() {
     'use strict';
 
-    // Maintain stable device ID across reloads of the same tab, preventing ghost duplicate collaborators
-    let myDeviceId;
+    // --- Cross-Device & Mobile Detection + Stable Device Identity Engine ---
+    const myTabInstanceId = 'tab_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+    const joinedWorkspaceAt = Date.now();
+
+    const isMobileDevice = (typeof navigator !== 'undefined') && (
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '') ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    );
+
+    function getCookieValue(name) {
+        try {
+            const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+            return match ? decodeURIComponent(match[1]) : null;
+        } catch(e) { return null; }
+    }
+
+    function setCookieValue(name, val) {
+        try {
+            document.cookie = `${name}=${encodeURIComponent(val)}; path=/; max-age=31536000; SameSite=Lax`;
+        } catch(e) {}
+    }
+
+    let myDeviceInstanceId;
     try {
-        const navEntry = (window.performance && window.performance.getEntriesByType) ? window.performance.getEntriesByType('navigation')[0] : null;
-        const isReload = (navEntry && navEntry.type === 'reload') || (window.performance && window.performance.navigation && window.performance.navigation.type === 1);
-        const storedId = sessionStorage.getItem('quickpad_tab_dev_id');
-        if (storedId) {
-            myDeviceId = storedId;
-        } else {
-            myDeviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+        myDeviceInstanceId = localStorage.getItem('quickpad_device_instance_id') || getCookieValue('qp_dev_inst');
+        if (!myDeviceInstanceId) {
+            myDeviceInstanceId = 'inst_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+        }
+        localStorage.setItem('quickpad_device_instance_id', myDeviceInstanceId);
+        setCookieValue('qp_dev_inst', myDeviceInstanceId);
+    } catch(e) {
+        myDeviceInstanceId = getCookieValue('qp_dev_inst') || ('inst_' + Date.now().toString(36) + Math.random().toString(36).substring(2));
+        setCookieValue('qp_dev_inst', myDeviceInstanceId);
+    }
+
+    const myDeviceSig = (function() {
+        try {
+            const w = window.screen ? Math.min(window.screen.width, window.screen.height) : 0;
+            const h = window.screen ? Math.max(window.screen.width, window.screen.height) : 0;
+            const dpr = window.devicePixelRatio || 1;
+            const plat = (typeof navigator !== 'undefined' && navigator.platform) ? navigator.platform : '';
+            const tz = (typeof Intl !== 'undefined' && Intl.DateTimeFormat) ? (Intl.DateTimeFormat().resolvedOptions().timeZone || '') : '';
+            const lang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : '';
+            return [isMobileDevice ? 'M' : 'D', `${w}x${h}@${dpr}`, plat, tz, lang].join('|');
+        } catch(e) {
+            return isMobileDevice ? 'M|generic' : 'D|generic';
+        }
+    })();
+
+    // Maintain stable device ID across reloads, QR handoffs, and mobile tabs, preventing ghost duplicate collaborators
+    let myDeviceId;
+    let isPrimaryDeviceTab = false;
+    try {
+        let primaryDevId = localStorage.getItem('quickpad_device_id') || getCookieValue('qp_dev_id');
+        const sessionDevId = sessionStorage.getItem('quickpad_tab_dev_id');
+        if (!primaryDevId) {
+            primaryDevId = sessionDevId || ('dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2));
+        }
+        localStorage.setItem('quickpad_device_id', primaryDevId);
+        setCookieValue('qp_dev_id', primaryDevId);
+
+        if (isMobileDevice) {
+            // On mobile & tablet devices, always use the unified device ID so QR scans or new tabs never spawn duplicate users
+            myDeviceId = primaryDevId;
+            isPrimaryDeviceTab = true;
             sessionStorage.setItem('quickpad_tab_dev_id', myDeviceId);
+        } else {
+            // On desktop, use the primary device ID unless another tab in the same browser is actively holding the primary lock
+            let activeLock = null;
+            try {
+                const rawLock = localStorage.getItem('quickpad_primary_tab_lock');
+                if (rawLock) activeLock = JSON.parse(rawLock);
+            } catch(e) {}
+
+            const now = Date.now();
+            const lockHeldByOtherLiveTab = activeLock &&
+                activeLock.tabId &&
+                activeLock.tabId !== myTabInstanceId &&
+                (now - (activeLock.ts || 0) < 4500) &&
+                sessionDevId !== primaryDevId;
+
+            if (!lockHeldByOtherLiveTab) {
+                myDeviceId = primaryDevId;
+                isPrimaryDeviceTab = true;
+                sessionStorage.setItem('quickpad_tab_dev_id', myDeviceId);
+                try {
+                    localStorage.setItem('quickpad_primary_tab_lock', JSON.stringify({ tabId: myTabInstanceId, devId: myDeviceId, ts: now }));
+                } catch(e) {}
+            } else {
+                if (sessionDevId && sessionDevId !== primaryDevId) {
+                    myDeviceId = sessionDevId;
+                } else {
+                    myDeviceId = 'dev_' + now.toString(36) + Math.random().toString(36).substring(2);
+                    sessionStorage.setItem('quickpad_tab_dev_id', myDeviceId);
+                }
+            }
         }
     } catch(e) {
-        myDeviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+        myDeviceId = getCookieValue('qp_dev_id') || ('dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2));
+        setCookieValue('qp_dev_id', myDeviceId);
     }
-    const myTabInstanceId = 'tab_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
 
     // iOS Keyboard Dismiss Fix
     window.addEventListener('focusout', () => window.scrollTo(0, 0));
@@ -51,6 +136,9 @@
         if (!isAppInitialized) return;
         if (window.location.hash !== lastKnownHash) {
             lastKnownHash = window.location.hash;
+            if (typeof removeMyCloudPresence === 'function') {
+                removeMyCloudPresence();
+            }
             window.location.reload();
         }
     });
@@ -442,8 +530,11 @@
     let multiPaneTabs = { pane2: null };
     let multiPanePreviews = { pane2: false };
     let lastSyncedServerTabs = {};
+    let lastSentByMeTabs = {};
     let lastSavedTabsJSON = "";
     let tabsContentDirty = false;
+    let isPollsDirty = false;
+    let pendingCloudSaveAfterInit = false;
     let localSyncChannel = null;
     let isCloudQuotaExceeded = false;
     let hasWarnedQuota = false;
@@ -2827,6 +2918,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     showToast("Vote retracted", 'info');
                 }
 
+                isPollsDirty = true;
                 updatePreview();
                 saveWorkspace();
             });
@@ -3224,11 +3316,15 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 if (burnBtn) burnBtn.style.display = 'none';
                 if (instantBurnBtn) instantBurnBtn.style.display = 'none';
             } else if (padParam) {
-                rawToken = padParam;
+                rawToken = padParam.trim();
                 window.history.replaceState({}, '', `#${rawToken}`);
                 try { localStorage.setItem('quickpad_last_active_hash', rawToken); } catch(e){}
             } else if (window.location.hash && window.location.hash.length > 1) {
-                rawToken = window.location.hash.substring(1);
+                try {
+                    rawToken = decodeURIComponent(window.location.hash.substring(1)).trim();
+                } catch(e) {
+                    rawToken = window.location.hash.substring(1).trim();
+                }
                 try { localStorage.setItem('quickpad_last_active_hash', rawToken); } catch(e){}
             } else {
                 // When opened without a hash (e.g. Chrome App / PWA launch from dock or desktop),
@@ -3683,22 +3779,91 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     }
 
     // --- Unified Presence UI Engine (Keeps Online Badges & Collaborator Bubbles in 100% Real-Time Sync) ---
+    const lastSeenRemoteCursorTs = {}; // cid -> last seen remote c.timestamp
+
+    function deduplicatePeerCursors(now) {
+        const cids = Object.keys(peerCursorsData);
+        if (cids.length <= 1) return;
+
+        // Group by browser instance / public key / mobile hardware signature
+        const byIdentityKey = new Map();
+        for (const cid of cids) {
+            if (cid === myDeviceId) continue;
+            const c = peerCursorsData[cid];
+            if (!c || c.isLocalTab) continue;
+
+            const keys = [];
+            if (c.deviceInstanceId) keys.push('inst:' + c.deviceInstanceId);
+            if (c.pubKey && c.pubKey.n) keys.push('pub:' + c.pubKey.n);
+            if (c.isMobile && c.deviceSig) {
+                keys.push('msig:' + c.deviceSig + '|' + (c.name || 'Anon') + '|' + (c.avatar || ''));
+            }
+
+            for (const k of keys) {
+                if (!byIdentityKey.has(k)) {
+                    byIdentityKey.set(k, cid);
+                } else {
+                    const existingCid = byIdentityKey.get(k);
+                    if (existingCid === cid) continue;
+                    const existing = peerCursorsData[existingCid];
+                    if (!existing) {
+                        byIdentityKey.set(k, cid);
+                        continue;
+                    }
+                    // For mobile signature matches, if both have sent >= 3 independent live heartbeats within 3s of each other, allow both
+                    const isMobileSigOnly = k.startsWith('msig:') &&
+                        (!c.deviceInstanceId || !existing.deviceInstanceId || c.deviceInstanceId !== existing.deviceInstanceId);
+                    if (isMobileSigOnly) {
+                        const bothActivelyHeartbeating = (c.heartbeatCount || 0) >= 3 &&
+                            (existing.heartbeatCount || 0) >= 3 &&
+                            Math.abs((c.lastSeenLocalTime || 0) - (existing.lastSeenLocalTime || 0)) < 3500 &&
+                            (now - (c.lastSeenLocalTime || 0) < 4500) &&
+                            (now - (existing.lastSeenLocalTime || 0) < 4500);
+                        if (bothActivelyHeartbeating) continue;
+                    }
+
+                    // Keep the most recently updated cursor and prune the older ghost duplicate
+                    const cTime = (c.lastSeenLocalTime || 0);
+                    const exTime = (existing.lastSeenLocalTime || 0);
+                    const cRemote = (c.timestamp || 0);
+                    const exRemote = (existing.timestamp || 0);
+                    const cIsNewer = (cTime !== exTime) ? (cTime > exTime) : (cRemote >= exRemote);
+                    const staleCid = cIsNewer ? existingCid : cid;
+                    const keepCid = cIsNewer ? cid : existingCid;
+
+                    removePeerCursor(staleCid);
+                    delete peerCursorsData[staleCid];
+                    byIdentityKey.set(k, keepCid);
+
+                    if (db && currentToken && !isBurnMode) {
+                        try {
+                            const delPayload = {};
+                            delPayload[`cursors.${staleCid}`] = firebase.firestore.FieldValue.delete();
+                            db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
+                        } catch(e) {}
+                    }
+                }
+            }
+        }
+    }
+
     function updatePresenceUI() {
         const activeUsers = new Map();
         activeUsers.set(myDeviceId, { name: myUsername, avatar: myAvatarUrl, speaking: isVoiceTransmitting });
 
         const now = Date.now();
+        deduplicatePeerCursors(now);
+
         for (let cid in peerCursorsData) {
             if (cid === myDeviceId) continue;
             const c = peerCursorsData[cid];
             if (!c) continue;
-            // Prune if inactive for more than 35 seconds locally
-            const lastActive = Math.max(c.lastSeenLocalTime || 0, c.timestamp || 0);
+            // Prune if inactive for more than 35 seconds using local monotonic reception time (immune to cross-device clock skew)
+            const lastActive = c.lastSeenLocalTime || c.timestamp || 0;
             if (now - lastActive > 35000) {
                 removePeerCursor(cid);
                 delete peerCursorsData[cid];
-                // Only purge from cloud if very stale (> 120s) to avoid cross-device clock skew delete wars
-                if (db && currentToken && !isBurnMode && (now - lastActive > 120000)) {
+                if (db && currentToken && !isBurnMode && (now - lastActive > 65000)) {
                     try {
                         const delPayload = {};
                         delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
@@ -3727,8 +3892,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (typeof updateWormholePeersUI === 'function') {
             updateWormholePeersUI();
         }
+        if (typeof renderCollaboratorsModal === 'function' && collaboratorsModal && !collaboratorsModal.classList.contains('hidden')) {
+            renderCollaboratorsModal();
+        }
 
-        // Update Presence Header / Bottom Bar UI on both tabs
+        // Update Presence Header / Bottom Bar UI on all devices
         const totalCount = activeUsers.size;
         if (onlineCountText) {
             onlineCountText.innerText = totalCount === 1 ? '1 Online' : `${totalCount} Online`;
@@ -3792,8 +3960,26 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         }
     }
 
-    // Announce departure on tab close
-    window.addEventListener('beforeunload', () => {
+    // --- Unified Departure & Mobile QR Handoff Cleanup ---
+    let hiddenPresenceCleanupTimer = null;
+    let lastHiddenTimestamp = 0;
+
+    function removeMyCloudPresence(releasePrimaryLock = false) {
+        if (typeof cursorBroadcastTimeout !== 'undefined' && cursorBroadcastTimeout) {
+            clearTimeout(cursorBroadcastTimeout);
+            cursorBroadcastTimeout = null;
+        }
+        if (releasePrimaryLock && isPrimaryDeviceTab && !isMobileDevice) {
+            try {
+                const rawLock = localStorage.getItem('quickpad_primary_tab_lock');
+                if (rawLock) {
+                    const parsed = JSON.parse(rawLock);
+                    if (parsed && parsed.tabId === myTabInstanceId) {
+                        localStorage.removeItem('quickpad_primary_tab_lock');
+                    }
+                }
+            } catch(e) {}
+        }
         broadcastLocalSync({
             type: 'peer_disconnect',
             senderId: myDeviceId
@@ -3807,26 +3993,79 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 }
             } catch(e) {}
         }
-    });
+    }
 
-    // Heartbeat to keep collaborator presence in sync across tabs and cloud
+    // Announce departure on tab close, mobile Safari/Chrome pagehide, and QR preview handoff
+    window.addEventListener('beforeunload', () => removeMyCloudPresence(true));
+    window.addEventListener('pagehide', () => removeMyCloudPresence(true));
+
+    // Heartbeat to keep collaborator presence in sync across tabs and cloud (only when page is visible)
     setInterval(() => {
-        if (typeof syncMyCursor === 'function') {
-            syncMyCursor();
+        if (isPrimaryDeviceTab && !isMobileDevice && !document.hidden) {
+            try {
+                localStorage.setItem('quickpad_primary_tab_lock', JSON.stringify({ tabId: myTabInstanceId, devId: myDeviceId, ts: Date.now() }));
+            } catch(e) {}
+        }
+        if (!document.hidden && document.visibilityState !== 'hidden') {
+            if (typeof syncMyCursor === 'function') {
+                syncMyCursor();
+            }
         }
         if (typeof updatePresenceUI === 'function') {
             updatePresenceUI();
         }
     }, 3000);
 
-    // Announce immediate presence when mobile or desktop tab regains visibility
+    // Handle visibility transitions on mobile (QR scanner preview -> browser handoff, app switch) and desktop
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
+        if (document.visibilityState === 'hidden') {
+            lastHiddenTimestamp = Date.now();
+            if (typeof cursorBroadcastTimeout !== 'undefined' && cursorBroadcastTimeout) {
+                clearTimeout(cursorBroadcastTimeout);
+                cursorBroadcastTimeout = null;
+            }
+            if (isMobileDevice) {
+                // On mobile/tablet, immediately clean up presence when QR preview closes or app backgrounds
+                if (tabsContentDirty || dirtyTabIds.size > 0) {
+                    saveWorkspace();
+                }
+                removeMyCloudPresence(false);
+            } else {
+                if (hiddenPresenceCleanupTimer) clearTimeout(hiddenPresenceCleanupTimer);
+                hiddenPresenceCleanupTimer = setTimeout(() => {
+                    if (document.visibilityState === 'hidden') {
+                        removeMyCloudPresence(false);
+                    }
+                }, 20000);
+            }
+        } else if (document.visibilityState === 'visible') {
+            if (hiddenPresenceCleanupTimer) {
+                clearTimeout(hiddenPresenceCleanupTimer);
+                hiddenPresenceCleanupTimer = null;
+            }
+            if (isPrimaryDeviceTab && !isMobileDevice) {
+                try {
+                    localStorage.setItem('quickpad_primary_tab_lock', JSON.stringify({ tabId: myTabInstanceId, devId: myDeviceId, ts: Date.now() }));
+                } catch(e) {}
+            }
             if (typeof syncMyCursor === 'function') {
                 syncMyCursor(true);
             }
             if (typeof updatePresenceUI === 'function') {
                 updatePresenceUI();
+            }
+            if (tabsContentDirty || dirtyTabIds.size > 0) {
+                saveWorkspace();
+            }
+        }
+    });
+
+    window.addEventListener('pageshow', (e) => {
+        if (document.visibilityState !== 'hidden') {
+            if (typeof syncMyCursor === 'function') syncMyCursor(true);
+            if (typeof updatePresenceUI === 'function') updatePresenceUI();
+            if (e.persisted && currentToken && typeof setupRealtimeSync === 'function') {
+                setupRealtimeSync(currentToken);
             }
         }
     });
@@ -3932,9 +4171,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         hasLoadedInitialCloudSnapshot = false;
         initStrokesListener();
 
-        // Immediately announce presence to Firestore upon room connection
+        // Immediately announce presence to Firestore upon room connection (only if tab is actively visible)
         setTimeout(() => {
-            if (typeof syncMyCursor === 'function') {
+            if (typeof syncMyCursor === 'function' && !document.hidden && document.visibilityState !== 'hidden') {
                 syncMyCursor(true);
             }
         }, 80);
@@ -3953,10 +4192,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
 
                         const isInitialLoad = !hasLoadedInitialCloudSnapshot;
                         hasLoadedInitialCloudSnapshot = true;
+                        if (pendingCloudSaveAfterInit) {
+                            pendingCloudSaveAfterInit = false;
+                            setTimeout(() => {
+                                if (typeof scheduleWorkspaceSave === 'function') scheduleWorkspaceSave();
+                            }, 50);
+                        }
 
-                        // If snapshot is an echo of this tab's own recent write, update baseline & skip clobbering editor
+                        // If snapshot is an echo of this tab's own recent write, update baseline & check for concurrent remote tab changes
                         const isSelfWriter = (data.last_writer === myDeviceId);
-                        if (isSelfWriter && data.tabs) {
+                        let hasUnappliedServerChanges = false;
+                        if (data.tabs) {
                             for (let tid in data.tabs) {
                                 let content = data.tabs[tid].content || '';
                                 if (vaultPassword && content.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
@@ -3965,7 +4211,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                         if (dec && dec.length > 0) content = dec;
                                     } catch(e) {}
                                 }
-                                lastSyncedServerTabs[tid] = { content: content };
+                                if (isSelfWriter) {
+                                    // Check if another device modified a different tab concurrently just before our write landed
+                                    const localVal = tabsData[tid] ? (tabsData[tid].content || '') : '';
+                                    const sentByMe = lastSentByMeTabs[tid];
+                                    const normServer = content.replace(/\r\n/g, '\n').trimEnd();
+                                    const normLocal = localVal.replace(/\r\n/g, '\n').trimEnd();
+                                    if (normServer !== normLocal && (sentByMe === undefined || content !== sentByMe)) {
+                                        hasUnappliedServerChanges = true;
+                                    } else {
+                                        lastSyncedServerTabs[tid] = { content: content };
+                                    }
+                                }
                             }
                         }
                     
@@ -4017,10 +4274,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             }
                         }
 
-                        // Synchronize workspace tabs: Always hydrate on initial snapshot and when missing tabs or order updates are discovered, even if self was the last writer
+                        // Synchronize workspace tabs: Always hydrate on initial snapshot and when missing/deleted tabs, order updates, or concurrent edits are discovered
                         const hasMissingTabs = data.tabs && Object.keys(data.tabs).some(tid => !tabsData[tid]);
+                        const hasRemoteDeletedTabs = data.tabs && Object.keys(data.tabs).length > 0 && Object.keys(tabsData).some(tid => !data.tabs[tid] && !dirtyTabIds.has(tid));
                         const hasOrderMismatch = Array.isArray(data.tab_order) && data.tab_order.length > 0 && JSON.stringify(tabOrder) !== JSON.stringify(data.tab_order);
-                        const shouldSyncTabs = (!isSelfWriter || isInitialLoad || hasMissingTabs || hasOrderMismatch) && (data.tabs || data.content);
+                        const shouldSyncTabs = (!isSelfWriter || isInitialLoad || hasMissingTabs || hasRemoteDeletedTabs || hasOrderMismatch || hasUnappliedServerChanges) && (data.tabs || data.content);
                         if (shouldSyncTabs) {
                             let tabsUpdated = false;
                             if (Array.isArray(data.tab_order) && data.tab_order.length > 0) {
@@ -4190,8 +4448,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     const serverChanged = (normServer !== normLocal);
                                     const isDirtyLocally = dirtyTabIds.has(tid);
                                     const isCurrentlyTypingInThisTab = isTypingInTab(tid);
+                                    const isOwnTabEcho = isSelfWriter && (lastSentByMeTabs[tid] !== undefined && content === lastSentByMeTabs[tid]);
 
-                                    if (serverChanged && (!isSelfWriter || isInitialLoad)) {
+                                    if (serverChanged && (!isOwnTabEcho || isInitialLoad)) {
                                         let finalContent = content;
                                         let newCursorPos = null;
 
@@ -4350,13 +4609,17 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 let c = data.cursors[cid];
                                 if (!c) continue;
 
-                                // Filter out stale ghost cursors (> 35s old) from previous sessions
-                                const cursorAge = (typeof c.timestamp === 'number') ? (now - c.timestamp) : Infinity;
-                                if (cursorAge > 35000) {
+                                // Self-Ghost Detection: If a stale cursor in Firestore belongs to our own browser/device instance
+                                // (e.g. from a page reload, Service Worker claim, or mobile QR scanner handoff), purge it immediately!
+                                const isSameInstance = (c.deviceInstanceId && c.deviceInstanceId === myDeviceInstanceId) ||
+                                    (c.pubKey && myPublicKeyJwk && c.pubKey.n && myPublicKeyJwk.n && c.pubKey.n === myPublicKeyJwk.n);
+                                const isMobileQrHandoffGhost = isMobileDevice && c.isMobile && c.deviceSig && (c.deviceSig === myDeviceSig) &&
+                                    ((c.name || 'Anon') === (myUsername || 'Anon')) &&
+                                    ((now - joinedWorkspaceAt < 25000) || (typeof c.timestamp === 'number' && c.timestamp <= (lastFirestoreCursorSync || now)));
+                                if ((isSameInstance || isMobileQrHandoffGhost) && !(peerCursorsData[cid] && peerCursorsData[cid].isLocalTab)) {
                                     removePeerCursor(cid);
                                     delete peerCursorsData[cid];
-                                    // Only purge from cloud if very stale (> 120s) to avoid cross-device clock skew delete wars
-                                    if (db && currentToken && !isBurnMode && cursorAge > 120000) {
+                                    if (db && currentToken && !isBurnMode) {
                                         try {
                                             const delPayload = {};
                                             delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
@@ -4366,18 +4629,47 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     continue;
                                 }
 
-                                const isNewPeer = !peerCursorsData[cid];
-                                const prevFlareTime = peerCursorsData[cid] ? peerCursorsData[cid].lastFlareTime : 0;
+                                // Track whether this peer's remote timestamp actually changed in this snapshot
+                                const remoteChanged = (lastSeenRemoteCursorTs[cid] !== c.timestamp);
+                                if (c.timestamp) lastSeenRemoteCursorTs[cid] = c.timestamp;
+                                const prevPeer = peerCursorsData[cid];
+
+                                // Filter out stale ghost cursors from previous sessions on initial load, or cursors that stopped updating (> 35s local time)
+                                const cursorClockAge = (typeof c.timestamp === 'number') ? (now - c.timestamp) : Infinity;
+                                const localElapsed = prevPeer ? (now - (prevPeer.lastSeenLocalTime || now)) : 0;
+                                if ((isInitialLoad && !prevPeer && cursorClockAge > 35000) || (!remoteChanged && prevPeer && localElapsed > 35000)) {
+                                    removePeerCursor(cid);
+                                    delete peerCursorsData[cid];
+                                    // Purge from cloud if abandoned (> 90s)
+                                    if (db && currentToken && !isBurnMode && (cursorClockAge > 90000 || localElapsed > 90000)) {
+                                        try {
+                                            const delPayload = {};
+                                            delPayload[`cursors.${cid}`] = firebase.firestore.FieldValue.delete();
+                                            db.collection("workspaces").doc(currentToken).update(delPayload).catch(() => {});
+                                        } catch(e) {}
+                                    }
+                                    continue;
+                                }
+
+                                const isNewPeer = !prevPeer;
+                                const prevFlareTime = prevPeer ? prevPeer.lastFlareTime : 0;
+                                const prevLaserTime = prevPeer ? prevPeer.lastLaserTime : 0;
+                                const prevHeartbeatCount = prevPeer ? (prevPeer.heartbeatCount || 0) : 0;
                                 peerCursorsData[cid] = {
                                     pos: typeof c.pos === 'number' ? c.pos : 0,
                                     name: c.name || 'Anon',
                                     pubKey: c.pubKey || null,
+                                    deviceInstanceId: c.deviceInstanceId || null,
+                                    deviceSig: c.deviceSig || null,
+                                    isMobile: !!c.isMobile,
                                     tabId: c.tabId || 'main',
                                     avatar: c.avatar || '',
                                     speaking: !!c.speaking,
                                     timestamp: c.timestamp || now,
-                                    lastSeenLocalTime: now,
-                                    lastFlareTime: prevFlareTime
+                                    lastSeenLocalTime: remoteChanged ? now : (prevPeer ? prevPeer.lastSeenLocalTime : now),
+                                    heartbeatCount: prevHeartbeatCount + (remoteChanged ? 1 : 0),
+                                    lastFlareTime: prevFlareTime,
+                                    lastLaserTime: prevLaserTime
                                 };
                                 activeUsers.set(cid, {
                                     name: c.name || 'Anon',
@@ -4392,14 +4684,15 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     renderPeerCursor(cid, c.pos, c.name, c.tabId);
                                 } else {
                                     removePeerCursor(cid);
-                                    if (c.tabId && c.timestamp && (now - c.timestamp < 3500) && (c.typing || c.isTyping)) {
+                                    if (c.tabId && (remoteChanged || Math.abs(now - (c.timestamp || 0)) < 3500) && (c.typing || c.isTyping)) {
                                         triggerTabRemoteActivity(c.tabId, cid, c.name);
                                     }
                                 }
 
-                                // Check remote cursor emoji flare (only spawn if viewing the same tab)
-                                if (c.flare && c.flare.timestamp && (now - c.flare.timestamp < 3500)) {
-                                    if (!peerCursorsData[cid].lastFlareTime || peerCursorsData[cid].lastFlareTime !== c.flare.timestamp) {
+                                // Check remote cursor emoji flare (only spawn if viewing the same tab; immune to cross-device clock skew)
+                                if (c.flare && c.flare.timestamp) {
+                                    const isFreshFlare = (peerCursorsData[cid].lastFlareTime !== c.flare.timestamp) && (!isInitialLoad || Math.abs(now - c.flare.timestamp) < 5000);
+                                    if (isFreshFlare) {
                                         if (isVisibleInPane1 || isVisibleInPane2) {
                                             const targetTa = isVisibleInPane1 ? editor : multiPane2Editor;
                                             spawnFlareParticle(c.pos, c.flare.emoji, false, getCaretCoordinates(targetTa, c.pos));
@@ -4408,8 +4701,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                     }
                                 }
 
-                                // v3.0 Check remote collaborator laser pointer & trail
-                                if (c.laser && c.laser.active && (now - c.laser.timestamp < 10000)) {
+                                // v3.0 Check remote collaborator laser pointer & trail (immune to cross-device clock skew)
+                                const laserUpdated = c.laser && c.laser.active && (remoteChanged || peerCursorsData[cid].lastLaserTime !== c.laser.timestamp || Math.abs(now - (c.laser.timestamp || 0)) < 10000);
+                                if (laserUpdated) {
+                                    peerCursorsData[cid].lastLaserTime = c.laser.timestamp || now;
                                     const rx = typeof c.laser.x === 'number' ? c.laser.x : null;
                                     const ry = typeof c.laser.y === 'number' ? c.laser.y : null;
                                     if (rx !== null && ry !== null) {
@@ -4454,16 +4749,19 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 }
                             }
 
-                            // Prune peers that disconnected or timed out (> 35s) (unless connected as local tab)
+                            // Prune peers that disconnected or timed out (> 35s local time) (unless connected as local tab)
                             for (let existingCid in peerCursorsData) {
                                 if (existingCid === myDeviceId) continue;
                                 const p = peerCursorsData[existingCid];
-                                const pLastSeen = Math.max(p.lastSeenLocalTime || 0, p.timestamp || 0);
+                                const pLastSeen = p.lastSeenLocalTime || p.timestamp || 0;
                                 if (!p.isLocalTab && (!data.cursors[existingCid] || (now - pLastSeen > 35000))) {
                                     removePeerCursor(existingCid);
                                     delete peerCursorsData[existingCid];
                                 }
                             }
+
+                            // Deduplicate any ghost cursors from the same device/QR scan before updating UI
+                            deduplicatePeerCursors(now);
 
                             // Update presence UI
                             if (typeof updatePresenceUI === 'function') {
@@ -4502,6 +4800,13 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                             handleIncomingWormholeSignal(data.wormhole);
                         }
                     } else {
+                        hasLoadedInitialCloudSnapshot = true;
+                        if (pendingCloudSaveAfterInit) {
+                            pendingCloudSaveAfterInit = false;
+                            setTimeout(() => {
+                                if (typeof scheduleWorkspaceSave === 'function') scheduleWorkspaceSave();
+                            }, 50);
+                        }
                         // Brand new workspace: start clean, blank and ready for user typing
                         if (tabsData['main'] && !tabsData['main'].content && !isReadOnly && !isBurnMode) {
                             updateHUD();
@@ -5573,7 +5878,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     }
 
     if (multiPane2Editor) {
-        ['mousedown', 'beforeinput', 'paste', 'drop', 'keydown'].forEach(evt => {
+        ['mousedown', 'touchstart', 'beforeinput', 'paste', 'drop', 'keydown'].forEach(evt => {
             multiPane2Editor.addEventListener(evt, () => {
                 if (glitchIntervalPane2) stopCipherGlitchAnimationPane2();
             });
@@ -5585,6 +5890,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         multiPane2Editor.addEventListener('click', () => {
             if (!isBurnMode) syncMyCursor();
         });
+        multiPane2Editor.addEventListener('touchend', () => {
+            if (!isBurnMode) setTimeout(() => syncMyCursor(), 30);
+        }, { passive: true });
         multiPane2Editor.addEventListener('scroll', () => {
             updateAllVisiblePeerCursors();
         });
@@ -5851,7 +6159,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
     async function deleteTabFromDB(tid) {
         if (isBurnMode || !db || !currentToken) return;
         try {
-            const payload = {};
+            const payload = {
+                last_writer: myDeviceId,
+                updated_at: Date.now()
+            };
             payload[`tabs.${tid}`] = firebase.firestore.FieldValue.delete();
             await db.collection("workspaces").doc(currentToken).update(payload);
         } catch(e) {}
@@ -5952,8 +6263,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 } catch(e) {}
             }
 
-            // If nothing changed and no timer or polls, skip network write
-            if (!needsTabsSave && !timerMinutes && Object.keys(workspacePolls).length === 0) {
+            // Guard against overwriting cloud tabs before the initial Firestore snapshot has arrived on slow networks
+            if (db && !hasLoadedInitialCloudSnapshot) {
+                pendingCloudSaveAfterInit = true;
+                return;
+            }
+
+            // If nothing changed and no timer or dirty polls, skip network write
+            if (!needsTabsSave && !timerMinutes && !isPollsDirty) {
                 setSaveStatus(isCloudQuotaExceeded ? 'quota' : 'saved');
                 return;
             }
@@ -5971,6 +6288,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 tabId: activeTabForCursor,
                 timestamp: Date.now(),
                 pubKey: myPublicKeyJwk,
+                deviceInstanceId: myDeviceInstanceId,
+                deviceSig: myDeviceSig,
+                isMobile: isMobileDevice,
                 typing: isCurrentlyTyping
             };
 
@@ -5980,10 +6300,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 updated_at: Date.now(),
                 last_writer: myDeviceId
             };
-            if (isInitialSave) {
-                payload.cursors = { [myDeviceId]: myCursorData };
-            } else {
-                payload[`cursors.${myDeviceId}`] = myCursorData;
+            const isTabVisibleNow = !document.hidden && document.visibilityState !== 'hidden' && !document.prerendering;
+            if (isTabVisibleNow) {
+                if (isInitialSave) {
+                    payload.cursors = { [myDeviceId]: myCursorData };
+                } else {
+                    payload[`cursors.${myDeviceId}`] = myCursorData;
+                }
+                lastFirestoreCursorSync = Date.now();
             }
 
             broadcastLocalSync({
@@ -5991,10 +6315,10 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                 senderId: myDeviceId,
                 cursor: myCursorData
             });
-            lastFirestoreCursorSync = Date.now();
 
-            if (Object.keys(workspacePolls).length > 0) {
+            if (isPollsDirty || (isInitialSave && Object.keys(workspacePolls).length > 0)) {
                 payload.polls = workspacePolls;
+                isPollsDirty = false;
             }
 
             function serializeTabContent(tid) {
@@ -6022,6 +6346,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                     for (let tid in tabsData) {
                         payload.tabs[tid] = serializeTabContent(tid);
                         sentContents.set(tid, tabsData[tid].content);
+                        lastSentByMeTabs[tid] = tabsData[tid].content;
                     }
                 } else {
                     if (dirtyTabIds.size === 0 && activeTabId) {
@@ -6033,9 +6358,11 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 payload[`tabs.${tid}`] = firebase.firestore.FieldValue.delete();
                             }
                             sentContents.set(tid, null);
+                            delete lastSentByMeTabs[tid];
                         } else {
                             payload[`tabs.${tid}`] = serializeTabContent(tid);
                             sentContents.set(tid, tabsData[tid].content);
+                            lastSentByMeTabs[tid] = tabsData[tid].content;
                         }
                     }
                 }
@@ -6060,15 +6387,18 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
                                 is_encrypted: !!vaultPassword,
                                 updated_at: Date.now(),
                                 last_writer: myDeviceId,
-                                cursors: { [myDeviceId]: myCursorData },
                                 tab_order: tabOrder,
                                 tabs: {}
                             };
+                            if (isTabVisibleNow) {
+                                fallbackPayload.cursors = { [myDeviceId]: myCursorData };
+                            }
                             if (payload.polls) fallbackPayload.polls = payload.polls;
                             if (payload.expires_at) fallbackPayload.expires_at = payload.expires_at;
                             for (let tid in tabsData) {
                                 fallbackPayload.tabs[tid] = serializeTabContent(tid);
                                 sentContents.set(tid, tabsData[tid].content);
+                                lastSentByMeTabs[tid] = tabsData[tid].content;
                             }
                             await db.collection("workspaces").doc(currentToken).set(fallbackPayload, { merge: true });
                         }
@@ -6318,6 +6648,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             tabId: activeTabForCursor,
             timestamp: Date.now(),
             pubKey: myPublicKeyJwk,
+            deviceInstanceId: myDeviceInstanceId,
+            deviceSig: myDeviceSig,
+            isMobile: isMobileDevice,
             typing: isCurrentlyTyping
         };
         if (latestFlare && (Date.now() - latestFlare.timestamp < 3500)) {
@@ -6344,6 +6677,12 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             senderId: myDeviceId,
             cursor: cursorData
         });
+
+        // Never write cloud presence if this tab/webview is backgrounded, hidden, or prerendering
+        // (prevents mobile QR scanner preview webviews from keeping a 2nd ghost user alive in Firestore)
+        if (document.hidden || document.visibilityState === 'hidden' || document.prerendering) {
+            return;
+        }
 
         // For Firestore cloud broadcast:
         if (!db || isCloudQuotaExceeded) return;
@@ -6376,7 +6715,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         updatePayload[`cursors.${myDeviceId}`] = cursorData;
         db.collection("workspaces").doc(currentToken).update(updatePayload).catch(err => {
             // Fallback to set with merge if document or field structure needs initialization
-            if (currentToken && !isBurnMode) {
+            if (currentToken && !isBurnMode && !document.hidden && document.visibilityState !== 'hidden') {
                 db.collection("workspaces").doc(currentToken).set({ cursors: { [myDeviceId]: cursorData } }, { merge: true }).catch(() => {});
             }
         });
@@ -6406,6 +6745,9 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
         if (loaderText) loaderText.textContent = "Back Online! Syncing...";
         if (loader) loader.classList.remove('offline');
         saveWorkspace();
+        if (!document.hidden && document.visibilityState !== 'hidden') {
+            syncMyCursor(true);
+        }
         showToast("Reconnected! Notes synchronized.", 'success');
         setTimeout(() => {
             if (loader) loader.classList.remove('visible');
@@ -6446,7 +6788,7 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             scheduleWorkspaceSave();
         });
 
-        ['mousedown', 'beforeinput', 'paste', 'drop'].forEach(evt => {
+        ['mousedown', 'touchstart', 'beforeinput', 'paste', 'drop'].forEach(evt => {
             editor.addEventListener(evt, () => {
                 if (glitchInterval) stopCipherGlitchAnimation();
             });
@@ -6536,6 +6878,14 @@ document.getElementById("pass").onkeydown=(e)=>{if(e.key==="Enter")unlock();};
             syncMyCursor();
             if (isFocusMode) scheduleFocusDimmingUpdate();
         });
+
+        editor.addEventListener('touchend', () => {
+            if (isBurnMode) return;
+            setTimeout(() => {
+                syncMyCursor();
+                if (isFocusMode) scheduleFocusDimmingUpdate();
+            }, 30);
+        }, { passive: true });
 
         editor.addEventListener('scroll', () => {
             updateAllVisiblePeerCursors();
